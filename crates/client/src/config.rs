@@ -40,6 +40,11 @@ pub struct AgentOsConfig {
     pub permissions: Option<Permissions>,
     /// Sidecar placement/config. Default: shared `default` pool.
     pub sidecar: Option<AgentOsSidecarConfig>,
+    /// Absolute path to the `agent-os-sidecar` binary, resolved from the npm
+    /// package on the TypeScript side. Threaded to `SidecarTransport::spawn`
+    /// (mirroring rivetkit's `engine_binary_path`) instead of relying on the
+    /// `AGENT_OS_SIDECAR_BIN` env var. `None` falls back to env, then `PATH`.
+    pub sidecar_binary_path: Option<String>,
 }
 
 /// Builder for [`AgentOsConfig`].
@@ -105,6 +110,11 @@ impl AgentOsConfigBuilder {
 
     pub fn sidecar(mut self, sidecar: AgentOsSidecarConfig) -> Self {
         self.config.sidecar = Some(sidecar);
+        self
+    }
+
+    pub fn sidecar_binary_path(mut self, path: impl Into<String>) -> Self {
+        self.config.sidecar_binary_path = Some(path.into());
         self
     }
 

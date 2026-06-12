@@ -110,6 +110,10 @@ pub struct AgentOsSidecar {
     pub(crate) shared_pool: Option<String>,
     pub(crate) state: AtomicU8,
     pub(crate) active_vm_count: AtomicU32,
+    /// Absolute path to the `agent-os-sidecar` binary, threaded from
+    /// `AgentOsConfig` (resolved from the npm package on the TS side) and passed
+    /// to `SidecarTransport::spawn` instead of relying on a process-global env.
+    pub(crate) sidecar_binary_path: Option<String>,
     /// The shared sidecar process + authenticated connection, established on the first VM `create`
     /// against this sidecar and reused by every subsequent VM in the same (shared) sidecar.
     pub(crate) connection: tokio::sync::Mutex<Option<SharedConnection>>,
@@ -121,6 +125,7 @@ impl AgentOsSidecar {
         sidecar_id: impl Into<String>,
         placement: AgentOsSidecarPlacement,
         shared_pool: Option<String>,
+        sidecar_binary_path: Option<String>,
     ) -> Self {
         Self {
             sidecar_id: sidecar_id.into(),
@@ -128,6 +133,7 @@ impl AgentOsSidecar {
             shared_pool,
             state: AtomicU8::new(SidecarState::Ready.as_u8()),
             active_vm_count: AtomicU32::new(0),
+            sidecar_binary_path,
             connection: tokio::sync::Mutex::new(None),
         }
     }
@@ -149,7 +155,7 @@ impl AgentOsSidecar {
             ));
         }
 
-        let transport = SidecarTransport::spawn().await?;
+        let transport = SidecarTransport::spawn(self.sidecar_binary_path.clone()).await?;
         let authed = match transport
             .request(
                 OwnershipScope::connection("client-hint"),
@@ -323,7 +329,7 @@ impl AgentOs {
         let placement = AgentOsSidecarPlacement::Explicit {
             sidecar_id: sidecar_id.clone(),
         };
-        Ok(Arc::new(AgentOsSidecar::new(sidecar_id, placement, None)))
+        Ok(Arc::new(AgentOsSidecar::new(sidecar_id, placement, None, None)))
     }
 
     /// Get (or create) a pooled shared sidecar. Pool defaults to `"default"`. Uses the process-global
@@ -336,6 +342,7 @@ impl AgentOs {
     /// atomically with `entry`/`insert` so two racing callers converge on a single live handle.
     pub async fn get_shared_sidecar(
         pool: Option<String>,
+        sidecar_binary_path: Option<String>,
     ) -> Result<Arc<AgentOsSidecar>, ClientError> {
         let pool = pool.unwrap_or_else(|| "default".to_string());
         let cache = shared_sidecars();
@@ -361,6 +368,7 @@ impl AgentOs {
                 pool: placement_pool,
             },
             Some(pool.clone()),
+            sidecar_binary_path,
         ));
 
         // Insert atomically, replacing a stale (disposed) entry but yielding to a live one that a

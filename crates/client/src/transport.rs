@@ -69,8 +69,14 @@ impl SidecarTransport {
     ///
     /// Does NOT run the handshake; `AgentOs::create` drives Authenticate -> OpenSession -> CreateVm ->
     /// ConfigureVm using [`request`](Self::request) once the transport is live.
-    pub(crate) async fn spawn() -> Result<Arc<Self>, ClientError> {
-        let bin = std::env::var(SIDECAR_BIN_ENV).unwrap_or_else(|_| "agent-os-sidecar".to_string());
+    pub(crate) async fn spawn(binary_path: Option<String>) -> Result<Arc<Self>, ClientError> {
+        // Prefer the typed path threaded from `AgentOsConfig` (resolved from the
+        // npm package on the TypeScript side), mirroring how rivetkit threads
+        // `engine_binary_path` into `Command::new`. The `AGENT_OS_SIDECAR_BIN`
+        // env var stays only as a debug/override fallback.
+        let bin = binary_path
+            .or_else(|| std::env::var(SIDECAR_BIN_ENV).ok())
+            .unwrap_or_else(|| "agent-os-sidecar".to_string());
         let mut child = Command::new(&bin)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

@@ -178,9 +178,11 @@ impl AgentOs {
         let sidecar = match &config.sidecar {
             Some(crate::config::AgentOsSidecarConfig::Explicit { handle }) => handle.clone(),
             Some(crate::config::AgentOsSidecarConfig::Shared { pool }) => {
-                AgentOs::get_shared_sidecar(pool.clone()).await?
+                AgentOs::get_shared_sidecar(pool.clone(), config.sidecar_binary_path.clone()).await?
             }
-            None => AgentOs::get_shared_sidecar(None).await?,
+            None => {
+                AgentOs::get_shared_sidecar(None, config.sidecar_binary_path.clone()).await?
+            }
         };
         let (transport, connection_id, max_frame_bytes) = sidecar.ensure_connection().await?;
 

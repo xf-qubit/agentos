@@ -148,8 +148,14 @@ jobs:
           set -u
           FAILURES=""
 
+          # publisher: "npm" preserves the binary executable bit (pnpm publish
+          # normalizes file modes to 0644, stripping +x). Platform binary
+          # packages must use npm publish; workspace packages use pnpm publish so
+          # the `workspace:*` protocol is rewritten to concrete versions. This
+          # mirrors how rivet-dev/rivet ships rivet-engine via @rivetkit/engine-cli.
           publish_dir() {
             local dir="$1"
+            local publisher="${2:-pnpm}"
             local name version
             name=$(jq -r .name "$dir/package.json")
             version=$(jq -r .version "$dir/package.json")
@@ -157,15 +163,22 @@ jobs:
               echo "⏭ ${name}@${version} already published, skipping."
               return 0
             fi
-            echo "Publishing ${name}@${version}..."
-            if ! (cd "$dir" && pnpm publish --access public --tag "${NPM_TAG}" --no-git-checks); then
-              FAILURES="${FAILURES} ${name}"
+            echo "Publishing ${name}@${version} via ${publisher}..."
+            if [ "$publisher" = "npm" ]; then
+              if ! (cd "$dir" && npm publish --access public --tag "${NPM_TAG}"); then
+                FAILURES="${FAILURES} ${name}"
+              fi
+            else
+              if ! (cd "$dir" && pnpm publish --access public --tag "${NPM_TAG}" --no-git-checks); then
+                FAILURES="${FAILURES} ${name}"
+              fi
             fi
           }
 
-          # 1. Platform binary packages (not pnpm workspace members).
+          # 1. Platform binary packages (not pnpm workspace members). Published
+          #    with npm to keep the binary's executable bit (see publish_dir).
           for p in ${PRESENT}; do
-            publish_dir "packages/sidecar-binary/npm/${p}"
+            publish_dir "packages/sidecar-binary/npm/${p}" npm
           done
 
           # 2. Workspace packages (skip root, skip registry/software/). This
