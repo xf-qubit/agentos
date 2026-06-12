@@ -434,7 +434,8 @@ impl HostDirFilesystem {
             ctime_nsec,
             birthtime_ms: ctime_ms,
             ino: stat.st_ino,
-            nlink: stat.st_nlink,
+            // st_nlink is u64 on x86_64 but u32 on aarch64; widen for both.
+            nlink: u64::from(stat.st_nlink),
             uid: stat.st_uid,
             gid: stat.st_gid,
         }

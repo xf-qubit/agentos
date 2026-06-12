@@ -23,7 +23,9 @@ env:
   R2_BUCKET: rivet-releases
   R2_ENDPOINT: https://2a94c6a0ced8d35ea63cddc86c2681e7.r2.cloudflarestorage.com
   # Platform list kept in sync with packages/sidecar-binary/npm/* and the build matrix.
-  SIDECAR_PLATFORMS: "linux-x64-gnu linux-arm64-gnu"
+  # arm64 is deferred: it needs a portability fix verified end-to-end before the
+  # meta package advertises it as an optionalDependency.
+  SIDECAR_PLATFORMS: "linux-x64-gnu"
 
 jobs:
   build-sidecar:
@@ -35,9 +37,6 @@ jobs:
           - platform: linux-x64-gnu
             runner: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-          - platform: linux-arm64-gnu
-            runner: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -187,11 +186,13 @@ jobs:
             exit 1
           fi
 
-  upload-r2:
-    name: "Upload artifacts to R2"
+  release-assets:
+    name: "Release assets"
     needs: build-sidecar
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -200,50 +201,69 @@ jobs:
         with:
           pattern: sidecar-*
           path: artifacts
-      - name: Upload sidecar binaries + externalized pyodide assets to R2
+      - name: Create GitHub release and upload assets
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_RELEASES_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_RELEASES_SECRET_ACCESS_KEY }}
+          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
+          NPM_TAG: ${{ inputs.npm-tag }}
         run: |
           set -euo pipefail
           declare -A PLATFORM_TARGET=(
             [linux-x64-gnu]=x86_64-unknown-linux-gnu
             [linux-arm64-gnu]=aarch64-unknown-linux-gnu
           )
+
+          # Stage release assets: platform binaries + externalized pyodide
+          # assets (downloaded by the published execution crate's build.rs).
+          mkdir -p release-assets
           for p in $SIDECAR_PLATFORMS; do
             bin="artifacts/sidecar-${p}/agent-os-sidecar"
             if [ -f "$bin" ]; then
               target="${PLATFORM_TARGET[$p]}"
-              key="agent-os/${VERSION}/sidecar/agent-os-sidecar-${target}"
-              echo "Uploading $bin -> s3://${R2_BUCKET}/${key}"
-              aws s3 cp "$bin" "s3://${R2_BUCKET}/${key}" \
-                --endpoint-url "$R2_ENDPOINT" --checksum-algorithm CRC32
+              cp "$bin" "release-assets/agent-os-sidecar-${target}"
             else
-              echo "::warning::no binary for ${p}; skipping R2 upload"
+              echo "::warning::no binary for ${p}"
             fi
           done
-
-          # Externalized pyodide assets (excluded from the published execution
-          # crate) must exist on the CDN before the crate is published, because
-          # the crate's build.rs downloads them at the matching version path.
           for f in \
             pyodide.asm.wasm \
             pyodide.asm.js \
             python_stdlib.zip \
             numpy-2.2.5-cp313-cp313-pyodide_2025_0_wasm32.whl \
             pandas-2.3.3-cp313-cp313-pyodide_2025_0_wasm32.whl; do
-            src="crates/execution/assets/pyodide/${f}"
-            key="agent-os/${VERSION}/pyodide/${f}"
-            echo "Uploading $src -> s3://${R2_BUCKET}/${key}"
-            aws s3 cp "$src" "s3://${R2_BUCKET}/${key}" \
+            cp "crates/execution/assets/pyodide/${f}" "release-assets/${f}"
+          done
+
+          if ! gh release view "v${VERSION}" >/dev/null 2>&1; then
+            PRERELEASE=""
+            if [ "${NPM_TAG}" = "rc" ]; then PRERELEASE="--prerelease"; fi
+            gh release create "v${VERSION}" --title "v${VERSION}" --generate-notes $PRERELEASE
+          fi
+          # --clobber so re-runs overwrite assets idempotently.
+          gh release upload "v${VERSION}" release-assets/* --clobber
+
+      - name: Best-effort upload to R2 (skipped without credentials)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_RELEASES_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_RELEASES_SECRET_ACCESS_KEY }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -uo pipefail
+          if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+            echo "R2 credentials not configured; skipping R2 upload (GitHub release assets are authoritative)."
+            exit 0
+          fi
+          set -e
+          for f in release-assets/agent-os-sidecar-*; do
+            base=$(basename "$f")
+            aws s3 cp "$f" "s3://${R2_BUCKET}/agent-os/${VERSION}/sidecar/${base}" \
               --endpoint-url "$R2_ENDPOINT" --checksum-algorithm CRC32
           done
 
   publish-crates:
     name: "Publish crates.io"
-    needs: upload-r2
-    if: ${{ !cancelled() && needs.upload-r2.result == 'success' }}
+    needs: release-assets
+    if: ${{ !cancelled() && needs.release-assets.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -274,6 +294,10 @@ jobs:
             mkdir -p "$out"
             node packages/core/scripts/build-v8-bridge.mjs --out-dir "$out"
           done
+          # The generated bundles are gitignored, and `cargo package` honors
+          # gitignore. Force them into the git index so they get packaged into
+          # the published crate (consumed by build_support.rs at build time).
+          git add -f crates/execution/assets/generated crates/v8-runtime/assets/generated
           # Refresh the vendored base-filesystem fixtures used by published crates.
           cp packages/core/fixtures/base-filesystem.json crates/kernel/assets/base-filesystem.json
           cp packages/core/fixtures/base-filesystem.json crates/sidecar/assets/base-filesystem.json
@@ -305,31 +329,3 @@ jobs:
             agent-os-client; do
             publish_crate "$crate"
           done
-
-  github-release:
-    name: "GitHub release"
-    needs: publish-npm
-    if: ${{ !cancelled() && needs.publish-npm.result == 'success' }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: v${{ inputs.version }}
-      - name: Create GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if gh release view "v${{ inputs.version }}" >/dev/null 2>&1; then
-            echo "GitHub release v${{ inputs.version }} already exists, skipping."
-          else
-            PRERELEASE=""
-            if [ "${{ inputs.npm-tag }}" = "rc" ]; then
-              PRERELEASE="--prerelease"
-            fi
-            gh release create "v${{ inputs.version }}" \
-              --title "v${{ inputs.version }}" \
-              --generate-notes \
-              $PRERELEASE
-          fi

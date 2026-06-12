@@ -39,8 +39,12 @@ fn stage_pyodide_assets(manifest_dir: &Path, out_dir: &Path) {
         )
     });
 
+    // Externalized assets are published as GitHub Release assets for the
+    // matching tag, so building the published crate only needs public HTTP
+    // access (no registry credentials).
     let version = env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION must be set");
-    let base_url = format!("https://releases.rivet.dev/agent-os/{version}/pyodide");
+    let base_url =
+        format!("https://github.com/rivet-dev/agent-os/releases/download/v{version}");
 
     for asset in EXTERNALIZED_PYODIDE_ASSETS {
         let in_tree = manifest_dir.join("assets/pyodide").join(asset);
