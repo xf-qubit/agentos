@@ -1,6 +1,6 @@
 // S3 File System: mount an S3 bucket and use it like a local filesystem.
 //
-// Uses createS3Backend from @rivet-dev/agent-os-s3 to mount an S3-compatible
+// Uses createS3Backend from @secure-exec/s3 to mount an S3-compatible
 // bucket at /mnt/data through the native S3 plugin descriptor.
 //
 // Required env vars:
@@ -15,7 +15,7 @@
 //   still exercises the real quickstart flow against signed S3 requests.
 
 import { AgentOs } from "@rivet-dev/agent-os-core";
-import { createS3Backend } from "@rivet-dev/agent-os-s3";
+import { createS3Backend } from "@secure-exec/s3";
 import type { MockS3ServerHandle } from "../../../packages/core/src/test/mock-s3.js";
 import { startMockS3Server } from "../../../packages/core/src/test/mock-s3.js";
 

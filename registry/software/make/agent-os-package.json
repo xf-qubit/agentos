@@ -1,8 +1,0 @@
-{
-  "name": "@rivet-dev/agent-os-make",
-  "type": "wasm",
-  "description": "GNU make build tool (planned)",
-  "aptName": "make",
-  "source": "rust",
-  "status": "planned"
-}

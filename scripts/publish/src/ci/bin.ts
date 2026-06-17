@@ -17,6 +17,10 @@ import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { $ } from "execa";
 import {
+	releaseArtifactPrefix,
+	releaseUserAgent,
+} from "../lib/artifacts.js";
+import {
 	resolveContext,
 	writeContextToGithubOutput,
 	type Trigger,
@@ -25,20 +29,10 @@ import { createGhRelease, tagAndPush } from "../lib/git.js";
 import { scoped } from "../lib/logger.js";
 import { publishAll } from "../lib/npm.js";
 import { copyPrefix, uploadDir } from "../lib/r2.js";
+import { discoverRustCrates } from "../lib/rust-crates.js";
 import { bumpCargoVersions, bumpPackageJsons } from "../lib/version.js";
 
 const log = scoped("ci");
-
-// Internal crates published to crates.io in dependency order:
-// bridge -> {kernel, v8-runtime} -> execution -> sidecar -> client.
-const RUST_CRATES = [
-	"agent-os-bridge",
-	"agent-os-kernel",
-	"agent-os-v8-runtime",
-	"agent-os-execution",
-	"agent-os-sidecar",
-	"agent-os-client",
-] as const;
 
 function findRepoRoot(): string {
 	if (process.env.GITHUB_WORKSPACE) return process.env.GITHUB_WORKSPACE;
@@ -59,7 +53,7 @@ async function crateVersionExists(name: string, version: string): Promise<boolea
 		`https://crates.io/api/v1/crates/${encodeURIComponent(name)}/${encodeURIComponent(version)}`,
 		{
 			headers: {
-				"User-Agent": "agent-os-release-publisher (https://github.com/rivet-dev/agent-os)",
+				"User-Agent": releaseUserAgent(),
 			},
 		},
 	);
@@ -209,13 +203,17 @@ program
 	.action(async (opts) => {
 		const repoRoot = findRepoRoot();
 		const version = opts.version ?? (await resolveContext()).version;
+		const crates = discoverRustCrates(repoRoot);
 		const waitSeconds = Number(opts.waitSeconds);
 		if (!Number.isFinite(waitSeconds) || waitSeconds <= 0) {
 			throw new Error("--wait-seconds must be a positive number");
 		}
+		if (crates.length === 0) {
+			throw new Error("no publishable Rust crates discovered");
+		}
 
 		if (opts.dryRun) {
-			const crate = RUST_CRATES[0];
+			const crate = crates[0];
 			log.info(
 				`dry-running ${crate}; later crates require earlier versions to exist in the crates.io index`,
 			);
@@ -229,7 +227,7 @@ program
 			throw new Error("CARGO_REGISTRY_TOKEN must be set to publish crates");
 		}
 
-		for (const crate of RUST_CRATES) {
+		for (const crate of crates) {
 			if (await crateVersionExists(crate, version)) {
 				log.info(`skipping ${crate}@${version}; already published`);
 				continue;
@@ -245,7 +243,7 @@ program
 	});
 
 // ---------------------------------------------------------------------------
-// upload-r2 — upload the sidecar artifact dir to agent-os/{sha}/sidecar/
+// upload-r2 — upload the sidecar artifact dir to {namespace}/{sha}/sidecar/
 // ---------------------------------------------------------------------------
 program
 	.command("upload-r2")
@@ -255,12 +253,12 @@ program
 	.option("--name <name>", "R2 sub-path name", "sidecar")
 	.action(async (opts) => {
 		const sha = opts.sha ?? (await resolveContext()).sha;
-		const prefix = `agent-os/${sha}/${opts.name}/`;
+		const prefix = releaseArtifactPrefix({ ref: sha, name: opts.name });
 		await uploadDir(opts.source, prefix);
 	});
 
 // ---------------------------------------------------------------------------
-// copy-r2 — copy agent-os/{sha}/sidecar/ to agent-os/{version}/sidecar/ (+latest)
+// copy-r2 — copy {namespace}/{sha}/sidecar/ to {namespace}/{version}/sidecar/
 // ---------------------------------------------------------------------------
 program
 	.command("copy-r2")
@@ -274,10 +272,16 @@ program
 		const sha: string = opts.sha ?? ctx.sha;
 		const version: string = opts.version ?? ctx.version;
 		const latest = opts.latest !== undefined ? opts.latest === "true" : ctx.latest;
-		const source = `agent-os/${sha}/${opts.name}/`;
-		await copyPrefix(source, `agent-os/${version}/${opts.name}/`);
+		const source = releaseArtifactPrefix({ ref: sha, name: opts.name });
+		await copyPrefix(
+			source,
+			releaseArtifactPrefix({ ref: version, name: opts.name }),
+		);
 		if (latest) {
-			await copyPrefix(source, `agent-os/latest/${opts.name}/`);
+			await copyPrefix(
+				source,
+				releaseArtifactPrefix({ ref: "latest", name: opts.name }),
+			);
 		}
 	});
 

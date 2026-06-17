@@ -1,7 +1,7 @@
 import type {
 	MountConfigJsonObject,
 	NativeMountPluginDescriptor,
-} from "./agent-os.js";
+} from "@secure-exec/core/descriptors";
 
 export interface HostDirBackendOptions {
 	/** Absolute path to the host directory to project into the VM. */

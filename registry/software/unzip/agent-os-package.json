@@ -1,7 +1,0 @@
-{
-  "name": "@rivet-dev/agent-os-unzip",
-  "type": "wasm",
-  "description": "unzip archive extraction",
-  "aptName": "unzip",
-  "source": "c"
-}

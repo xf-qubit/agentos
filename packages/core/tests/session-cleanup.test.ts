@@ -12,6 +12,11 @@ import pi from "@rivet-dev/agent-os-pi";
 import piCli from "@rivet-dev/agent-os-pi-cli";
 import { describe, expect, test } from "vitest";
 import { AgentOs } from "../src/agent-os.js";
+import {
+	decodeAcpResponse,
+	encodeAcpRequest,
+	encodeAcpResponse,
+} from "../src/sidecar/agent-os-protocol.js";
 import { NativeSidecarKernelProxy } from "../src/sidecar/rpc-client.js";
 import { getAgentOsKernel } from "../src/test/runtime.js";
 import type { SidecarSessionState } from "../src/sidecar/rpc-client.js";
@@ -24,13 +29,12 @@ import {
 	createVmOpenCodeHome,
 	createVmWorkspace as createOpenCodeWorkspace,
 } from "./helpers/opencode-helper.js";
-import {
-	REGISTRY_SOFTWARE,
-} from "./helpers/registry-commands.js";
+import { REGISTRY_SOFTWARE } from "./helpers/registry-commands.js";
 
 const MODULE_ACCESS_CWD = resolve(import.meta.dirname, "..");
 const PROMPT_TEXT = "Reply with exactly cleanup-ok.";
 const PROMPT_RESPONSE = "cleanup-ok";
+const ACP_EXTENSION_NAMESPACE = "dev.rivet.agent-os.acp";
 
 type MockKind = "anthropic";
 
@@ -41,7 +45,10 @@ type SessionCleanupAgent = {
 	activePromptTermination: "close" | "cancel_then_close";
 	activePromptMock: "hang";
 	createVm: (mockUrl: string) => Promise<AgentOs>;
-	createSession: (vm: AgentOs, mockUrl: string) => Promise<{ sessionId: string }>;
+	createSession: (
+		vm: AgentOs,
+		mockUrl: string,
+	) => Promise<{ sessionId: string }>;
 };
 
 const PI_AGENTS: SessionCleanupAgent[] = [
@@ -176,6 +183,11 @@ async function createVmPiWorkspace(vm: AgentOs): Promise<string> {
 
 type SidecarBackdoor = AgentOs & {
 	_sidecarClient: {
+		extensionRequest(
+			session: unknown,
+			vm: unknown,
+			envelope: { namespace: string; payload: Uint8Array },
+		): Promise<{ namespace: string; payload: Uint8Array }>;
 		getSessionState(
 			session: unknown,
 			vm: unknown,
@@ -229,8 +241,6 @@ function stubSessionEntry(sessionId: string): Record<string, unknown> {
 		configOptions: [],
 		capabilities: {},
 		agentInfo: null,
-		highestSequenceNumber: null,
-		events: [],
 		eventHandlers: new Set(),
 		permissionHandlers: new Set(),
 		configOverrides: new Map(),
@@ -243,11 +253,39 @@ async function getSessionState(
 	sessionId: string,
 ): Promise<SidecarSessionState> {
 	const backdoor = vm as SidecarBackdoor;
-	return backdoor._sidecarClient.getSessionState(
+	const envelope = await backdoor._sidecarClient.extensionRequest(
 		backdoor._sidecarSession,
 		backdoor._sidecarVm,
-		sessionId,
+		{
+			namespace: ACP_EXTENSION_NAMESPACE,
+			payload: encodeAcpRequest({
+				tag: "AcpGetSessionStateRequest",
+				val: { sessionId },
+			}),
+		},
 	);
+	expect(envelope.namespace).toBe(ACP_EXTENSION_NAMESPACE);
+	const response = decodeAcpResponse(envelope.payload);
+	if (response.tag !== "AcpSessionStateResponse") {
+		throw new Error(`unexpected ACP state response: ${response.tag}`);
+	}
+	return {
+		sessionId: response.val.sessionId,
+		agentType: response.val.agentType,
+		processId: response.val.processId,
+		...(response.val.pid !== null ? { pid: response.val.pid } : {}),
+		closed: response.val.closed,
+		...(response.val.modes !== null
+			? { modes: JSON.parse(response.val.modes) }
+			: {}),
+		configOptions: response.val.configOptions.map((value) => JSON.parse(value)),
+		...(response.val.agentCapabilities !== null
+			? { agentCapabilities: JSON.parse(response.val.agentCapabilities) }
+			: {}),
+		...(response.val.agentInfo !== null
+			? { agentInfo: JSON.parse(response.val.agentInfo) }
+			: {}),
+	};
 }
 
 async function closeSessionAndWait(
@@ -283,19 +321,14 @@ function readHostProcesses(): HostProcessRow[] {
 				ppid: Number(ppid),
 			};
 		})
-		.filter(
-			(row) => Number.isFinite(row.pid) && Number.isFinite(row.ppid),
-		);
+		.filter((row) => Number.isFinite(row.pid) && Number.isFinite(row.ppid));
 }
 
 function collectHostProcessTree(rootPid: number): number[] {
 	return collectProcessTree(readHostProcesses(), rootPid);
 }
 
-function collectProcessTree(
-	rows: HostProcessRow[],
-	rootPid: number,
-): number[] {
+function collectProcessTree(rows: HostProcessRow[], rootPid: number): number[] {
 	const byParent = new Map<number, number[]>();
 	for (const row of rows) {
 		const children = byParent.get(row.ppid);
@@ -411,7 +444,9 @@ async function snapshotVmResources(vm: AgentOs): Promise<{
 	fdCount: number;
 	socketCount: number;
 }> {
-	const pids = [...new Set((await readKernelProcesses(vm)).map(({ pid }) => pid))];
+	const pids = [
+		...new Set((await readKernelProcesses(vm)).map(({ pid }) => pid)),
+	];
 	const links = (await Promise.all(pids.map((pid) => listFdLinks(pid)))).flat();
 	return {
 		pids,
@@ -474,7 +509,9 @@ async function assertSessionResourcesReleased(
 	expect(await zombieTimerCount(vm)).toBe(baselineZombieTimers);
 }
 
-function uniqueSessionRootPids(sessionStates: Array<{ pid?: number }>): number[] {
+function uniqueSessionRootPids(
+	sessionStates: Array<{ pid?: number }>,
+): number[] {
 	const pidCounts = new Map<number, number>();
 	for (const state of sessionStates) {
 		if (typeof state.pid !== "number") {
@@ -706,9 +743,7 @@ async function createHangingAnthropicServer(): Promise<{
 	};
 }
 
-async function createActivePromptMock(
-	_agent: SessionCleanupAgent,
-): Promise<{
+async function createActivePromptMock(_agent: SessionCleanupAgent): Promise<{
 	url: string;
 	stop: () => Promise<void>;
 	waitForRequest: () => Promise<void>;
@@ -789,54 +824,52 @@ async function assertActivePromptCleanup(
 }
 
 function registerSharedCleanupCoverage(agents: SessionCleanupAgent[]): void {
-	test.each(agents)(
-		"$label closeSession() frees session resources after a completed prompt and is idempotent",
-		async (agent) => {
-			const mock = await createTextMock(agent.mockKind);
-			const vm = await agent.createVm(mock.url);
-			try {
-				const baselineSessionCount = vm.listSessions().length;
-				const baselineZombieTimers = await zombieTimerCount(vm);
-				const baselineVmResources = await snapshotVmResources(vm);
-				const { sessionId } = await agent.createSession(vm, mock.url);
-				const sessionState = await getSessionState(vm, sessionId);
-				expect(sessionState.pid).toBeTypeOf("number");
+	test.each(
+		agents,
+	)("$label closeSession() frees session resources after a completed prompt and is idempotent", async (agent) => {
+		const mock = await createTextMock(agent.mockKind);
+		const vm = await agent.createVm(mock.url);
+		try {
+			const baselineSessionCount = vm.listSessions().length;
+			const baselineZombieTimers = await zombieTimerCount(vm);
+			const baselineVmResources = await snapshotVmResources(vm);
+			const { sessionId } = await agent.createSession(vm, mock.url);
+			const sessionState = await getSessionState(vm, sessionId);
+			expect(sessionState.pid).toBeTypeOf("number");
 
-				const { response, text } = await vm.prompt(sessionId, PROMPT_TEXT);
-				expect(response.error).toBeUndefined();
-				expect(text).toContain(PROMPT_RESPONSE);
-				expect((await readKernelProcesses(vm)).map(({ pid }) => pid)).toContain(
-					sessionState.pid!,
-				);
-				const vmResourcesBeforeClose = await snapshotVmResources(vm);
-				expect(vmResourcesBeforeClose.processCount).toBeGreaterThanOrEqual(
-					baselineVmResources.processCount + 1,
-				);
+			const { response, text } = await vm.prompt(sessionId, PROMPT_TEXT);
+			expect(response.error).toBeUndefined();
+			expect(text).toContain(PROMPT_RESPONSE);
+			expect((await readKernelProcesses(vm)).map(({ pid }) => pid)).toContain(
+				sessionState.pid!,
+			);
+			const vmResourcesBeforeClose = await snapshotVmResources(vm);
+			expect(vmResourcesBeforeClose.processCount).toBeGreaterThanOrEqual(
+				baselineVmResources.processCount + 1,
+			);
 
-				await closeSessionAndWait(vm, sessionId);
-				expect(vm.listSessions()).toHaveLength(baselineSessionCount);
-				await assertSessionResourcesReleased(
-					[sessionState.pid!],
-					baselineZombieTimers,
-					vm,
-					baselineVmResources,
-				);
+			await closeSessionAndWait(vm, sessionId);
+			expect(vm.listSessions()).toHaveLength(baselineSessionCount);
+			await assertSessionResourcesReleased(
+				[sessionState.pid!],
+				baselineZombieTimers,
+				vm,
+				baselineVmResources,
+			);
 
-				await expect(closeSessionAndWait(vm, sessionId)).resolves.toBeUndefined();
-				expect(vm.listSessions()).toHaveLength(baselineSessionCount);
-				await assertSessionResourcesReleased(
-					[sessionState.pid!],
-					baselineZombieTimers,
-					vm,
-					baselineVmResources,
-				);
-			} finally {
-				await vm.dispose();
-				await mock.stop();
-			}
-		},
-		300_000,
-	);
+			await expect(closeSessionAndWait(vm, sessionId)).resolves.toBeUndefined();
+			expect(vm.listSessions()).toHaveLength(baselineSessionCount);
+			await assertSessionResourcesReleased(
+				[sessionState.pid!],
+				baselineZombieTimers,
+				vm,
+				baselineVmResources,
+			);
+		} finally {
+			await vm.dispose();
+			await mock.stop();
+		}
+	}, 300_000);
 
 	test.each(agents)(
 		"$label active-prompt cleanup frees sockets, FDs, and processes",
@@ -851,9 +884,21 @@ describe("session cleanup", () => {
 	test("closed session tombstones stay bounded across 10,000 sequential closes", async () => {
 		const vm = await AgentOs.create();
 		const backdoor = vm as SidecarBackdoor;
-		const originalCloseAgentSession =
-			backdoor._sidecarClient.closeAgentSession.bind(backdoor._sidecarClient);
-		backdoor._sidecarClient.closeAgentSession = async () => {};
+		const originalExtensionRequest =
+			backdoor._sidecarClient.extensionRequest.bind(backdoor._sidecarClient);
+		backdoor._sidecarClient.extensionRequest = async (
+			_session,
+			_vm,
+			envelope,
+		) => {
+			return {
+				namespace: envelope.namespace,
+				payload: encodeAcpResponse({
+					tag: "AcpSessionClosedResponse",
+					val: { sessionId: "synthetic" },
+				}),
+			};
+		};
 
 		try {
 			const retentionLimit = backdoor._closedSessionIds.limit;
@@ -881,7 +926,7 @@ describe("session cleanup", () => {
 				`Session not found: ${evictedSessionId}`,
 			);
 		} finally {
-			backdoor._sidecarClient.closeAgentSession = originalCloseAgentSession;
+			backdoor._sidecarClient.extensionRequest = originalExtensionRequest;
 			await vm.dispose();
 		}
 	}, 30_000);
@@ -932,9 +977,9 @@ describe("session cleanup", () => {
 			const sessionStates = await Promise.all(
 				sessions.map(({ sessionId }) => getSessionState(vm, sessionId)),
 			);
-			expect(sessionStates.every((state) => typeof state.pid === "number")).toBe(
-				true,
-			);
+			expect(
+				sessionStates.every((state) => typeof state.pid === "number"),
+			).toBe(true);
 
 			const activePids = sessionStates.map((state) => state.pid!);
 			const dedicatedSessionPids = uniqueSessionRootPids(sessionStates);

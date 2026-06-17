@@ -17,9 +17,7 @@ import {
 	startLlmock,
 	stopLlmock,
 } from "./helpers/llmock-helper.js";
-import {
-	REGISTRY_SOFTWARE,
-} from "./helpers/registry-commands.js";
+import { REGISTRY_SOFTWARE } from "./helpers/registry-commands.js";
 import { AGENT_CONFIGS } from "../src/agents.js";
 import { processSoftware } from "../src/packages.js";
 
@@ -191,10 +189,15 @@ describe("full createSession('claude')", () => {
 				void vm.respondPermission(sessionId!, request.permissionId, "once");
 			});
 
+			const events: { method: string; params?: unknown }[] = [];
+			const unsubscribeEvents = vm.onSessionEvent(sessionId, (event) => {
+				events.push(event);
+			});
 			const { response } = await vm.prompt(
 				sessionId,
 				`Run ${XU_COMMAND} and tell me what it prints.`,
 			);
+			unsubscribeEvents();
 
 			expect(response.error).toBeUndefined();
 			expect((response.result as { stopReason?: string }).stopReason).toBe(
@@ -206,9 +209,6 @@ describe("full createSession('claude')", () => {
 					.some((req) => hasToolResultContaining(req, XU_OUTPUT)),
 			).toBe(true);
 
-			const events = vm
-				.getSessionEvents(sessionId)
-				.map((event) => event.notification);
 			expect(events.length).toBeGreaterThanOrEqual(1);
 			expect(events[0].method).toBe("session/update");
 			expect(
@@ -254,10 +254,15 @@ describe("full createSession('claude')", () => {
 			});
 			sessionId = session.sessionId;
 
+			const events: { method: string; params?: unknown }[] = [];
+			const unsubscribeEvents = promptVm.onSessionEvent(sessionId, (event) => {
+				events.push(event);
+			});
 			const { response } = await promptVm.prompt(
 				sessionId,
 				`Reply with exactly ${TEXT_ONLY_OUTPUT}.`,
 			);
+			unsubscribeEvents();
 
 			expect(response.error).toBeUndefined();
 			expect((response.result as { stopReason?: string }).stopReason).toBe(
@@ -265,9 +270,6 @@ describe("full createSession('claude')", () => {
 			);
 			expect(promptMock.getRequests().length).toBeGreaterThanOrEqual(1);
 
-			const events = promptVm
-				.getSessionEvents(sessionId)
-				.map((event) => event.notification);
 			expect(
 				events.some(
 					(event) =>
@@ -327,10 +329,15 @@ describe("full createSession('claude')", () => {
 				);
 			});
 
+			const events: { method: string; params?: unknown }[] = [];
+			const unsubscribeEvents = promptVm.onSessionEvent(sessionId, (event) => {
+				events.push(event);
+			});
 			const { response } = await promptVm.prompt(
 				sessionId,
 				`Run ${NODE_EXECSYNC_COMMAND} and tell me what it prints.`,
 			);
+			unsubscribeEvents();
 
 			expect(response.error).toBeUndefined();
 			expect((response.result as { stopReason?: string }).stopReason).toBe(
@@ -340,9 +347,6 @@ describe("full createSession('claude')", () => {
 				true,
 			);
 
-			const events = promptVm
-				.getSessionEvents(sessionId)
-				.map((event) => event.notification);
 			expect(
 				events.some(
 					(event) =>
@@ -403,10 +407,15 @@ describe("full createSession('claude')", () => {
 				);
 			});
 
+			const events: { method: string; params?: unknown }[] = [];
+			const unsubscribeEvents = promptVm.onSessionEvent(sessionId, (event) => {
+				events.push(event);
+			});
 			const { response } = await promptVm.prompt(
 				sessionId,
 				`Run ${NODE_ASYNC_SPAWN_COMMAND} and tell me what it prints.`,
 			);
+			unsubscribeEvents();
 
 			expect(response.error).toBeUndefined();
 			expect((response.result as { stopReason?: string }).stopReason).toBe(
@@ -418,9 +427,6 @@ describe("full createSession('claude')", () => {
 					.some((req) => hasToolResultContaining(req, NODE_ASYNC_SPAWN_OUTPUT)),
 			).toBe(true);
 
-			const events = promptVm
-				.getSessionEvents(sessionId)
-				.map((event) => event.notification);
 			expect(
 				events.some(
 					(event) =>
@@ -461,7 +467,6 @@ describe("full createSession('claude')", () => {
 				sessionId,
 				agentType: "claude",
 			});
-			expect(vm.resumeSession(sessionId)).toEqual({ sessionId });
 
 			const agentInfo = vm.getSessionAgentInfo(sessionId) as AgentInfo;
 			expect(agentInfo).toMatchObject({
@@ -494,9 +499,6 @@ describe("full createSession('claude')", () => {
 				sessionId: closedSessionId,
 				agentType: "claude",
 			});
-			expect(() => vm.resumeSession(closedSessionId)).toThrow(
-				"Session not found",
-			);
 		} finally {
 			if (sessionId) {
 				vm.closeSession(sessionId);
@@ -527,7 +529,6 @@ describe("full createSession('claude')", () => {
 			sessionId,
 			agentType: "claude",
 		});
-		expect(() => vm.resumeSession(sessionId)).toThrow("Session not found");
 	}, 120_000);
 
 	test("createSession('claude') reflects setSessionMode() through getSessionModes()", async () => {
@@ -543,20 +544,22 @@ describe("full createSession('claude')", () => {
 			});
 			sessionId = session.sessionId;
 
+			const modeEvents: { method: string; params?: unknown }[] = [];
+			const unsubscribeEvents = vm.onSessionEvent(sessionId, (event) => {
+				if (
+					event.method === "session/update" &&
+					JSON.stringify(event.params).includes("current_mode_update")
+				) {
+					modeEvents.push(event);
+				}
+			});
 			const response = await vm.setSessionMode(sessionId, "plan");
+			unsubscribeEvents();
 			expect(response.error).toBeUndefined();
 
 			const modes = vm.getSessionModes(sessionId);
 			expect(modes?.currentModeId).toBe("plan");
 
-			const modeEvents = vm
-				.getSessionEvents(sessionId)
-				.map((event) => event.notification)
-				.filter(
-					(event) =>
-						event.method === "session/update" &&
-						JSON.stringify(event.params).includes("current_mode_update"),
-				);
 			expect(modeEvents.length).toBeGreaterThanOrEqual(1);
 		} finally {
 			if (sessionId) {

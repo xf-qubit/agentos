@@ -17,13 +17,16 @@ import {
 } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
+	MountConfigJsonObject,
+	MountConfigJsonValue,
+	NativeMountPluginDescriptor,
+} from "@secure-exec/core/descriptors";
+import type {
 	AgentCapabilities,
 	AgentInfo,
-	GetEventsOptions,
 	PermissionReply,
 	PermissionRequest,
 	PermissionRequestHandler,
-	SequencedEvent,
 	SessionConfigOption,
 	SessionEventHandler,
 	SessionInitData,
@@ -54,13 +57,17 @@ import { resolvePublishedSidecarBinary } from "./sidecar/binary.js";
 import { findCargoBinary, resolveCargoBinary } from "./sidecar/cargo.js";
 
 export type {
+	MountConfigJsonObject,
+	MountConfigJsonPrimitive,
+	MountConfigJsonValue,
+	NativeMountPluginDescriptor,
+} from "@secure-exec/core/descriptors";
+export type {
 	AgentCapabilities,
 	AgentInfo,
-	GetEventsOptions,
 	PermissionReply,
 	PermissionRequest,
 	PermissionRequestHandler,
-	SequencedEvent,
 	SessionConfigOption,
 	SessionEventHandler,
 	SessionInitData,
@@ -79,6 +86,7 @@ export { isAcpTimeoutErrorData } from "./json-rpc.js";
 export type { ConnectTerminalOptions } from "./runtime-compat.js";
 
 const ACP_PROTOCOL_VERSION = 1;
+const ACP_EXTENSION_NAMESPACE = "dev.rivet.agent-os.acp";
 const SHELL_DISPOSE_TIMEOUT_MS = 5_000;
 
 function defaultAcpClientCapabilities(): Record<string, unknown> {
@@ -196,6 +204,16 @@ import {
 	type SoftwareRoot,
 } from "./packages.js";
 import { allowAll, createNodeHostNetworkAdapter } from "./runtime-compat.js";
+import {
+	type AcpRequest,
+	type AcpResponse,
+	AcpRuntimeKind,
+	decodeAcpCallback,
+	decodeAcpEvent,
+	decodeAcpResponse,
+	encodeAcpCallbackResponse,
+	encodeAcpRequest,
+} from "./sidecar/agent-os-protocol.js";
 import { serializeLimitsForSidecar } from "./sidecar/limits.js";
 import { serializePermissionsForSidecar } from "./sidecar/permissions.js";
 import {
@@ -213,7 +231,7 @@ import {
 	NativeSidecarKernelProxy,
 	NativeSidecarProcessClient,
 	type RootFilesystemEntry,
-	type SidecarRegisteredToolDefinition,
+	type SidecarRegisteredHostCallbackDefinition,
 	type SidecarRequestFrame,
 	type SidecarResponsePayload,
 	type SidecarSessionState,
@@ -262,6 +280,7 @@ interface AgentOsVmAdmin extends InProcessSidecarVmAdmin {
 	rootView: VirtualFileSystem;
 	hostMounts: HostMountInfo[];
 	env: Record<string, string>;
+	permissions: Permissions;
 	sidecarClient: NativeSidecarProcessClient;
 	sidecarSession: AuthenticatedSession;
 	sidecarVm: CreatedVm;
@@ -272,7 +291,6 @@ interface AgentOsVmAdmin extends InProcessSidecarVmAdmin {
 
 interface SessionEventSubscriber {
 	handler: SessionEventHandler;
-	lastDeliveredSequenceNumber: number | null;
 }
 
 interface AgentSessionEntry {
@@ -285,10 +303,7 @@ interface AgentSessionEntry {
 	configOptions: SessionConfigOption[];
 	capabilities: AgentCapabilities;
 	agentInfo: AgentInfo | null;
-	highestSequenceNumber: number | null;
-	events: SequencedEvent[];
 	eventHandlers: Set<SessionEventSubscriber>;
-	sessionEventDispatchScheduled: boolean;
 	permissionHandlers: Set<PermissionRequestHandler>;
 	configOverrides: Map<string, string>;
 	pendingPermissionReplies: Map<
@@ -325,23 +340,6 @@ export interface RootFilesystemConfig {
 	mode?: OverlayFilesystemMode;
 	disableDefaultBaseLayer?: boolean;
 	lowers?: RootLowerInput[];
-}
-
-export type MountConfigJsonPrimitive = string | number | boolean | null;
-export type MountConfigJsonValue =
-	| MountConfigJsonPrimitive
-	| MountConfigJsonObject
-	| MountConfigJsonValue[];
-
-export interface MountConfigJsonObject {
-	[key: string]: MountConfigJsonValue;
-}
-
-export interface NativeMountPluginDescriptor<
-	TConfig extends MountConfigJsonObject = MountConfigJsonObject,
-> {
-	id: string;
-	config?: TConfig;
 }
 
 /**
@@ -462,7 +460,7 @@ export interface AgentOsOptions {
 	/**
 	 * Software to install in the VM. Each entry provides agents, tools,
 	 * or WASM commands. Any object with a `commandDir` property (e.g.,
-	 * registry packages like @rivet-dev/agent-os-coreutils) is treated
+	 * registry packages like @agent-os-pkgs/coreutils) is treated
 	 * as a WASM command source automatically. Arrays are flattened, so
 	 * meta-packages that export arrays of sub-packages work directly.
 	 */
@@ -599,10 +597,109 @@ function toJsonRpcNotification(value: unknown): JsonRpcNotification {
 	return value as JsonRpcNotification;
 }
 
+function toJsonRpcResponse(value: unknown): JsonRpcResponse {
+	if (
+		!value ||
+		typeof value !== "object" ||
+		Array.isArray(value) ||
+		(value as { jsonrpc?: unknown }).jsonrpc !== "2.0" ||
+		!(
+			typeof (value as { id?: unknown }).id === "number" ||
+			typeof (value as { id?: unknown }).id === "string" ||
+			(value as { id?: unknown }).id === null
+		)
+	) {
+		throw new Error("Invalid JSON-RPC response from sidecar");
+	}
+	return value as JsonRpcResponse;
+}
+
+function toJsonRpcRequest(value: unknown): JsonRpcRequest {
+	if (
+		!value ||
+		typeof value !== "object" ||
+		Array.isArray(value) ||
+		(value as { jsonrpc?: unknown }).jsonrpc !== "2.0" ||
+		!(
+			typeof (value as { id?: unknown }).id === "number" ||
+			typeof (value as { id?: unknown }).id === "string" ||
+			(value as { id?: unknown }).id === null
+		) ||
+		typeof (value as { method?: unknown }).method !== "string"
+	) {
+		throw new Error("Invalid JSON-RPC request from ACP callback");
+	}
+	return value as JsonRpcRequest;
+}
+
 function toRecord(value: unknown): Record<string, unknown> {
 	return value && typeof value === "object" && !Array.isArray(value)
 		? (value as Record<string, unknown>)
 		: {};
+}
+
+type AcpResponseValue<TTag extends AcpResponse["tag"]> = Extract<
+	AcpResponse,
+	{ tag: TTag }
+>["val"];
+
+function parseAcpJson(value: string | null, context: string): unknown {
+	if (value === null) {
+		return undefined;
+	}
+	try {
+		return JSON.parse(value);
+	} catch (error) {
+		throw new Error(
+			`invalid ACP ${context} JSON: ${
+				error instanceof Error ? error.message : String(error)
+			}`,
+		);
+	}
+}
+
+function parseAcpJsonList(
+	values: readonly string[],
+	context: string,
+): unknown[] {
+	return values.map((value, index) =>
+		parseAcpJson(value, `${context}[${index}]`),
+	);
+}
+
+function sidecarSessionCreatedFromAcp(
+	response: AcpResponseValue<"AcpSessionCreatedResponse">,
+) {
+	return {
+		sessionId: response.sessionId,
+		...(response.pid !== null ? { pid: response.pid } : {}),
+		modes: parseAcpJson(response.modes, "modes"),
+		configOptions: parseAcpJsonList(response.configOptions, "configOptions"),
+		agentCapabilities: parseAcpJson(
+			response.agentCapabilities,
+			"agentCapabilities",
+		),
+		agentInfo: parseAcpJson(response.agentInfo, "agentInfo"),
+	};
+}
+
+function sidecarSessionStateFromAcp(
+	response: AcpResponseValue<"AcpSessionStateResponse">,
+): SidecarSessionState {
+	return {
+		sessionId: response.sessionId,
+		agentType: response.agentType,
+		processId: response.processId,
+		...(response.pid !== null ? { pid: response.pid } : {}),
+		closed: response.closed,
+		modes: parseAcpJson(response.modes, "modes"),
+		configOptions: parseAcpJsonList(response.configOptions, "configOptions"),
+		agentCapabilities: parseAcpJson(
+			response.agentCapabilities,
+			"agentCapabilities",
+		),
+		agentInfo: parseAcpJson(response.agentInfo, "agentInfo"),
+	};
 }
 
 function isLocalCancelledPromptResponse(
@@ -618,7 +715,6 @@ function isLocalCancelledPromptResponse(
 	);
 }
 
-const ACP_SESSION_EVENT_RETENTION_LIMIT = 1024;
 const CLOSED_SESSION_ID_RETENTION_LIMIT = 2048;
 const CLOSED_SHELL_ID_RETENTION_LIMIT = 2048;
 
@@ -660,59 +756,10 @@ class BoundedSet<T> {
 	}
 }
 
-function cloneSequencedEvents(events: SequencedEvent[]): SequencedEvent[] {
-	return events.map((event) => ({
-		sequenceNumber: event.sequenceNumber,
-		notification: event.notification,
-	}));
-}
-
-function mergeSequencedEvents(
-	current: SequencedEvent[],
-	incoming: SequencedEvent[],
-): SequencedEvent[] {
-	const bySequence = new Map<number, SequencedEvent>();
-	for (const event of current) {
-		bySequence.set(event.sequenceNumber, event);
-	}
-	for (const event of incoming) {
-		bySequence.set(event.sequenceNumber, event);
-	}
-	const merged = [...bySequence.values()].sort(
-		(left, right) => left.sequenceNumber - right.sequenceNumber,
-	);
-	return merged.length <= ACP_SESSION_EVENT_RETENTION_LIMIT
-		? merged
-		: merged.slice(-ACP_SESSION_EVENT_RETENTION_LIMIT);
-}
-
-function nextHighestSequenceNumber(
-	current: number | null,
-	events: SequencedEvent[],
-): number | null {
-	const latest = events.at(-1)?.sequenceNumber;
-	if (latest === undefined) {
-		return current;
-	}
-	return current === null ? latest : Math.max(current, latest);
-}
-
 function shouldDispatchToSessionEventHandlers(
 	notification: JsonRpcNotification,
 ): boolean {
 	return notification.method === "session/update";
-}
-
-function latestBufferedSessionEventSequence(
-	events: SequencedEvent[],
-): number | null {
-	for (let index = events.length - 1; index >= 0; index -= 1) {
-		const event = events[index];
-		if (event && shouldDispatchToSessionEventHandlers(event.notification)) {
-			return event.sequenceNumber;
-		}
-	}
-	return null;
 }
 
 function toSessionModes(value: unknown): SessionModeState | null {
@@ -758,10 +805,7 @@ function sessionEntryFromInit(
 		configOptions: initData.configOptions ?? [],
 		capabilities: initData.capabilities ?? {},
 		agentInfo: initData.agentInfo ?? null,
-		highestSequenceNumber: null,
-		events: [],
 		eventHandlers: new Set(),
-		sessionEventDispatchScheduled: false,
 		permissionHandlers: new Set(),
 		configOverrides: new Map(),
 		pendingPermissionReplies: new Map(),
@@ -1366,9 +1410,9 @@ function convertSidecarRootSnapshotEntries(
 
 function ensureNativeSidecarBinary(): string {
 	// A published install has no in-repo Cargo workspace to build from: resolve
-	// the prebuilt platform binary (or the AGENT_OS_SIDECAR_BINARY override).
+	// the prebuilt platform binary (or the AGENT_OS_SIDECAR_BIN override).
 	if (
-		process.env.AGENT_OS_SIDECAR_BINARY ||
+		process.env.AGENT_OS_SIDECAR_BIN ||
 		!existsSync(join(REPO_ROOT, "Cargo.toml"))
 	) {
 		return resolvePublishedSidecarBinary();
@@ -1448,7 +1492,7 @@ function collectGuestCommandPaths(commandDirs: string[]): Map<string, string> {
 			if (!isWasmBinaryFile(join(commandDir, entry)) || guestPaths.has(entry)) {
 				continue;
 			}
-			guestPaths.set(entry, `/__agentos/commands/${index}/${entry}`);
+			guestPaths.set(entry, `/__secure_exec/commands/${index}/${entry}`);
 		}
 	}
 
@@ -1578,7 +1622,7 @@ function collectSidecarMountPlan(options: {
 
 	for (const [index, commandDir] of options.commandDirs.entries()) {
 		pushMount({
-			path: `/__agentos/commands/${index}`,
+			path: `/__secure_exec/commands/${index}`,
 			plugin: createHostDirBackend({
 				hostPath: commandDir,
 				readOnly: true,
@@ -1652,7 +1696,7 @@ function validationMessage(error: unknown): string {
 
 function toolToSidecarDefinition(
 	tool: HostTool,
-): SidecarRegisteredToolDefinition {
+): SidecarRegisteredHostCallbackDefinition {
 	return {
 		description: tool.description,
 		inputSchema: zodToJsonSchema(tool.inputSchema),
@@ -1668,60 +1712,220 @@ function toolToSidecarDefinition(
 	};
 }
 
-async function handleToolInvocation(
+function combineInstructions(
+	additionalInstructions: string | undefined,
+	toolReference: string,
+): string | null {
+	const parts = [additionalInstructions, toolReference]
+		.map((part) => part?.trim())
+		.filter((part): part is string => Boolean(part));
+	if (parts.length === 0) {
+		return null;
+	}
+	return parts.join("\n\n");
+}
+
+function buildHostToolReference(toolKits: ToolKit[]): string {
+	if (toolKits.length === 0) {
+		return "";
+	}
+
+	const lines = [
+		"## Available Host Tools",
+		"",
+		"Run `agentos list-tools` to see all available tools.",
+		"",
+	];
+
+	for (const toolKit of toolKits) {
+		lines.push(`### ${toolKit.name}`);
+		lines.push("");
+		lines.push(toolKit.description);
+		lines.push("");
+		for (const [toolName, tool] of Object.entries(toolKit.tools)) {
+			const sidecarTool = toolToSidecarDefinition(tool);
+			const signature = buildToolFlagSignature(sidecarTool.inputSchema);
+			const suffix = signature.length > 0 ? ` ${signature}` : "";
+			lines.push(
+				`- \`agentos-${toolKit.name} ${toolName}${suffix}\` — ${tool.description}`,
+			);
+		}
+		lines.push("");
+
+		const toolsWithExamples = Object.entries(toolKit.tools).filter(
+			([, tool]) => tool.examples && tool.examples.length > 0,
+		);
+		if (toolsWithExamples.length > 0) {
+			lines.push("**Examples:**");
+			lines.push("");
+			for (const [toolName, tool] of toolsWithExamples) {
+				for (const example of tool.examples ?? []) {
+					const args = inputToToolFlags(example.input);
+					const suffix = args.length > 0 ? ` ${args}` : "";
+					lines.push(
+						`- ${example.description}: \`agentos-${toolKit.name} ${toolName}${suffix}\``,
+					);
+				}
+			}
+			lines.push("");
+		}
+
+		lines.push(`Run \`agentos-${toolKit.name} <tool> --help\` for details.`);
+		lines.push("");
+	}
+
+	return lines.join("\n");
+}
+
+function buildToolFlagSignature(schema: unknown): string {
+	return describeToolFlags(schema)
+		.map((flag) => {
+			if (flag.required) {
+				return `${flag.name} <${flag.type}>`;
+			}
+			return `[${flag.name} <${flag.type}>]`;
+		})
+		.join(" ");
+}
+
+function describeToolFlags(
+	schema: unknown,
+): Array<{ name: string; type: string; required: boolean }> {
+	const schemaObject = asRecord(schema);
+	const properties = asRecord(schemaObject.properties);
+	const required = Array.isArray(schemaObject.required)
+		? new Set(
+				schemaObject.required.filter(
+					(item): item is string => typeof item === "string",
+				),
+			)
+		: new Set<string>();
+
+	return Object.entries(properties).map(([fieldName, fieldSchema]) => ({
+		name: `--${camelToKebab(fieldName)}`,
+		type: describeToolFlagType(fieldSchema),
+		required: required.has(fieldName),
+	}));
+}
+
+function describeToolFlagType(schema: unknown): string {
+	const schemaObject = asRecord(schema);
+	const type =
+		typeof schemaObject.type === "string" ? schemaObject.type : undefined;
+	if (type === "array") {
+		const itemType = describeJsonSchemaScalarType(schemaObject.items);
+		return `${itemType}[]`;
+	}
+	if (type === "string") {
+		const enumValues = Array.isArray(schemaObject.enum)
+			? schemaObject.enum.filter(
+					(item): item is string => typeof item === "string",
+				)
+			: [];
+		return enumValues.length > 0 ? enumValues.join("|") : "string";
+	}
+	return type ?? "string";
+}
+
+function describeJsonSchemaScalarType(schema: unknown): string {
+	const schemaObject = asRecord(schema);
+	return typeof schemaObject.type === "string" ? schemaObject.type : "string";
+}
+
+function inputToToolFlags(input: unknown): string {
+	const inputObject = asRecord(input);
+	return Object.entries(inputObject)
+		.flatMap(([key, value]) => {
+			const flag = `--${camelToKebab(key)}`;
+			if (value === true) {
+				return [flag];
+			}
+			if (value === false) {
+				return [`--no-${camelToKebab(key)}`];
+			}
+			if (Array.isArray(value)) {
+				return value.map((item) => `${flag} ${toolCliString(item)}`);
+			}
+			return [`${flag} ${toolCliString(value)}`];
+		})
+		.join(" ");
+}
+
+function toolCliString(value: unknown): string {
+	return typeof value === "string" ? value : (JSON.stringify(value) ?? "null");
+}
+
+function camelToKebab(value: string): string {
+	return value.replace(
+		/[A-Z]/g,
+		(ch, index) => `${index > 0 ? "-" : ""}${ch.toLowerCase()}`,
+	);
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+	if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+		return value as Record<string, unknown>;
+	}
+	return {};
+}
+
+async function handleHostCallback(
 	request: SidecarRequestFrame,
-	toolMap: ReadonlyMap<string, HostTool>,
+	context: HostCallbackContext,
 ): Promise<SidecarResponsePayload> {
 	const payload = request.payload;
-	if (payload.type !== "tool_invocation") {
+	if (payload.type !== "host_callback") {
 		return {
-			type: "tool_invocation_result",
+			type: "host_callback_result",
 			invocation_id: "unknown",
 			error: `unsupported sidecar request type: ${payload.type}`,
 		};
 	}
 
-	const tool = toolMap.get(payload.tool_key);
+	const command = parseHostCommandCallbackInput(payload.input);
+	if (command) {
+		try {
+			return {
+				type: "host_callback_result",
+				invocation_id: payload.invocation_id,
+				result: await handleHostCommandCallback(command, context),
+			};
+		} catch (error) {
+			return {
+				type: "host_callback_result",
+				invocation_id: payload.invocation_id,
+				error: validationMessage(error),
+			};
+		}
+	}
+
+	const tool = context.toolMap.get(payload.callback_key);
 	if (!tool) {
 		return {
-			type: "tool_invocation_result",
+			type: "host_callback_result",
 			invocation_id: payload.invocation_id,
-			error: `Unknown tool "${payload.tool_key}"`,
+			error: `Unknown tool "${payload.callback_key}"`,
 		};
 	}
 
 	const parsed = tool.inputSchema.safeParse(payload.input);
 	if (!parsed.success) {
 		return {
-			type: "tool_invocation_result",
+			type: "host_callback_result",
 			invocation_id: payload.invocation_id,
 			error: validationMessage(parsed.error),
 		};
 	}
 
 	try {
-		const result = await Promise.race([
-			Promise.resolve(tool.execute(parsed.data)),
-			new Promise<never>((_, reject) =>
-				setTimeout(
-					() =>
-						reject(
-							new Error(
-								`Tool "${payload.tool_key}" timed out after ${payload.timeout_ms}ms`,
-							),
-						),
-					payload.timeout_ms,
-				),
-			),
-		]);
 		return {
-			type: "tool_invocation_result",
+			type: "host_callback_result",
 			invocation_id: payload.invocation_id,
-			result,
+			result: await executeHostTool(tool, payload.callback_key, parsed.data),
 		};
 	} catch (error) {
 		return {
-			type: "tool_invocation_result",
+			type: "host_callback_result",
 			invocation_id: payload.invocation_id,
 			error: validationMessage(error),
 		};
@@ -1738,6 +1942,397 @@ function buildToolMap(toolKits: ToolKit[]): Map<string, HostTool> {
 	return toolMap;
 }
 
+interface HostCommandCallbackInput {
+	type: "command";
+	command: string;
+	args: string[];
+	cwd: string;
+}
+
+interface HostCallbackContext {
+	toolKits: ToolKit[];
+	toolMap: ReadonlyMap<string, HostTool>;
+	permissions: Permissions;
+	readFile(path: string): Promise<Uint8Array>;
+}
+
+function parseHostCommandCallbackInput(
+	input: unknown,
+): HostCommandCallbackInput | null {
+	const value = asRecord(input);
+	if (
+		value.type !== "command" ||
+		typeof value.command !== "string" ||
+		typeof value.cwd !== "string" ||
+		!Array.isArray(value.args) ||
+		!value.args.every((arg): arg is string => typeof arg === "string")
+	) {
+		return null;
+	}
+	return {
+		type: "command",
+		command: value.command,
+		args: value.args,
+		cwd: value.cwd,
+	};
+}
+
+async function handleHostCommandCallback(
+	command: HostCommandCallbackInput,
+	context: HostCallbackContext,
+): Promise<unknown> {
+	const directToolKit = context.toolKits.find(
+		(toolKit) => `agentos-${toolKit.name}` === command.command,
+	);
+	if (command.command === "agentos") {
+		return handleAgentOsRegistryCommand(command, context);
+	}
+	if (directToolKit) {
+		return handleAgentOsToolkitCommand(command, context, directToolKit);
+	}
+	throw new Error(`Unknown host callback command "${command.command}"`);
+}
+
+async function handleAgentOsRegistryCommand(
+	command: HostCommandCallbackInput,
+	context: HostCallbackContext,
+): Promise<unknown> {
+	const [subcommand, toolkitName, toolName, ...toolArgs] = command.args;
+	if (!subcommand || isHelpFlag(subcommand)) {
+		return {
+			usage:
+				"agentos <command>: list-tools [toolkit], <toolkit> --help, or <toolkit> <tool> ...",
+		};
+	}
+	if (subcommand === "list-tools") {
+		return toolkitName
+			? describeToolkitPayload(context.toolKits, toolkitName)
+			: listToolkitsPayload(context.toolKits);
+	}
+	const toolKit = context.toolKits.find((kit) => kit.name === subcommand);
+	if (!toolKit) {
+		throw new Error(
+			`No toolkit "${subcommand}". Available: ${toolkitNames(context.toolKits)}`,
+		);
+	}
+	if (!toolkitName || isHelpFlag(toolkitName)) {
+		return describeToolkitPayload(context.toolKits, subcommand);
+	}
+	if (toolName && isHelpFlag(toolName)) {
+		return describeToolPayload(toolKit, toolkitName);
+	}
+	return invokeHostTool({
+		toolKit,
+		toolName: toolkitName,
+		args: [toolName, ...toolArgs].filter(
+			(value): value is string => typeof value === "string",
+		),
+		cwd: command.cwd,
+		context,
+	});
+}
+
+async function handleAgentOsToolkitCommand(
+	command: HostCommandCallbackInput,
+	context: HostCallbackContext,
+	toolKit: ToolKit,
+): Promise<unknown> {
+	const [toolName, helpOrFirstArg, ...rest] = command.args;
+	if (!toolName || isHelpFlag(toolName)) {
+		return describeToolkitPayload(context.toolKits, toolKit.name);
+	}
+	if (helpOrFirstArg && isHelpFlag(helpOrFirstArg)) {
+		return describeToolPayload(toolKit, toolName);
+	}
+	return invokeHostTool({
+		toolKit,
+		toolName,
+		args: [helpOrFirstArg, ...rest].filter(
+			(value): value is string => typeof value === "string",
+		),
+		cwd: command.cwd,
+		context,
+	});
+}
+
+async function invokeHostTool({
+	toolKit,
+	toolName,
+	args,
+	cwd,
+	context,
+}: {
+	toolKit: ToolKit;
+	toolName: string;
+	args: string[];
+	cwd: string;
+	context: HostCallbackContext;
+}): Promise<unknown> {
+	const tool = toolKit.tools[toolName];
+	if (!tool) {
+		throw new Error(
+			`No tool "${toolName}" in toolkit "${toolKit.name}". Available: ${toolNames(toolKit)}`,
+		);
+	}
+	const callbackKey = `${toolKit.name}:${toolName}`;
+	const permissionMode = toolPermissionMode(context.permissions, callbackKey);
+	if (permissionMode !== "allow") {
+		throw new Error(
+			`EACCES: blocked by tool.invoke policy for ${callbackKey}`,
+		);
+	}
+	const input = await parseHostToolInput(tool, args, cwd, context.readFile);
+	return executeHostTool(tool, callbackKey, input);
+}
+
+async function executeHostTool(
+	tool: HostTool,
+	callbackKey: string,
+	input: unknown,
+): Promise<unknown> {
+	const parsed = tool.inputSchema.safeParse(input);
+	if (!parsed.success) {
+		throw new Error(validationMessage(parsed.error));
+	}
+
+	return Promise.race([
+		Promise.resolve(tool.execute(parsed.data)),
+		new Promise<never>((_, reject) => {
+			if (tool.timeout === undefined) {
+				return;
+			}
+			setTimeout(
+				() =>
+					reject(
+						new Error(`Tool "${callbackKey}" timed out after ${tool.timeout}ms`),
+					),
+				tool.timeout,
+			);
+		}),
+	]);
+}
+
+async function parseHostToolInput(
+	tool: HostTool,
+	args: string[],
+	cwd: string,
+	readFile: (path: string) => Promise<Uint8Array>,
+): Promise<unknown> {
+	if (args[0] === "--json") {
+		const value = args[1];
+		if (value === undefined) {
+			throw new Error("Flag --json requires a value");
+		}
+		return JSON.parse(value);
+	}
+	if (args[0] === "--json-file") {
+		const value = args[1];
+		if (value === undefined) {
+			throw new Error("Flag --json-file requires a value");
+		}
+		const guestPath = value.startsWith("/")
+			? posixPath.normalize(value)
+			: posixPath.normalize(`${cwd}/${value}`);
+		const text = new TextDecoder().decode(await readFile(guestPath));
+		return JSON.parse(text);
+	}
+	return parseToolArgv(toolToSidecarDefinition(tool).inputSchema, args);
+}
+
+function parseToolArgv(schema: unknown, argv: string[]): Record<string, unknown> {
+	const schemaObject = asRecord(schema);
+	const properties = asRecord(schemaObject.properties);
+	const required = Array.isArray(schemaObject.required)
+		? new Set(
+				schemaObject.required.filter(
+					(value): value is string => typeof value === "string",
+				),
+			)
+		: new Set<string>();
+	const flagToField = new Map<string, [string, unknown]>();
+	for (const [fieldName, fieldSchema] of Object.entries(properties)) {
+		flagToField.set(camelToKebab(fieldName), [fieldName, fieldSchema]);
+	}
+
+	const input: Record<string, unknown> = {};
+	for (let index = 0; index < argv.length; ) {
+		const arg = argv[index];
+		if (!arg?.startsWith("--")) {
+			throw new Error(`Unexpected positional argument: "${arg}"`);
+		}
+		const rawFlag = arg.slice(2);
+		const negated = rawFlag.startsWith("no-");
+		const flagName = negated ? rawFlag.slice(3) : rawFlag;
+		const entry = flagToField.get(flagName);
+		if (!entry) {
+			throw new Error(`Unknown flag: --${rawFlag}`);
+		}
+		const [fieldName, fieldSchema] = entry;
+		const fieldType = jsonSchemaType(fieldSchema);
+		if (negated) {
+			if (fieldType !== "boolean") {
+				throw new Error(`Unknown flag: --${rawFlag}`);
+			}
+			input[fieldName] = false;
+			index += 1;
+			continue;
+		}
+		if (fieldType === "boolean") {
+			input[fieldName] = true;
+			index += 1;
+			continue;
+		}
+		const value = argv[index + 1];
+		if (value === undefined) {
+			throw new Error(`Flag --${rawFlag} requires a value`);
+		}
+		if (fieldType === "number" || fieldType === "integer") {
+			const number = Number(value);
+			if (!Number.isFinite(number)) {
+				throw new Error(`Flag --${rawFlag} expects a number, got "${value}"`);
+			}
+			input[fieldName] = number;
+			index += 2;
+			continue;
+		}
+		if (fieldType === "array") {
+			const current = Array.isArray(input[fieldName])
+				? (input[fieldName] as unknown[])
+				: [];
+			const itemSchema = asRecord(fieldSchema).items;
+			const itemType = jsonSchemaType(itemSchema);
+			current.push(
+				itemType === "number" || itemType === "integer"
+					? Number(value)
+					: value,
+			);
+			input[fieldName] = current;
+			index += 2;
+			continue;
+		}
+		input[fieldName] = value;
+		index += 2;
+	}
+
+	for (const fieldName of required) {
+		if (!(fieldName in input)) {
+			throw new Error(`Missing required flag: --${camelToKebab(fieldName)}`);
+		}
+	}
+	return input;
+}
+
+function listToolkitsPayload(toolKits: ToolKit[]): unknown {
+	return {
+		toolkits: toolKits.map((toolKit) => ({
+			name: toolKit.name,
+			description: toolKit.description,
+			tools: Object.keys(toolKit.tools),
+		})),
+	};
+}
+
+function describeToolkitPayload(
+	toolKits: ToolKit[],
+	toolkitName: string,
+): unknown {
+	const toolKit = toolKits.find((kit) => kit.name === toolkitName);
+	if (!toolKit) {
+		throw new Error(
+			`No toolkit "${toolkitName}". Available: ${toolkitNames(toolKits)}`,
+		);
+	}
+	return {
+		name: toolKit.name,
+		description: toolKit.description,
+		tools: Object.fromEntries(
+			Object.entries(toolKit.tools).map(([toolName, tool]) => [
+				toolName,
+				{
+					description: tool.description,
+					flags: describeToolFlags(toolToSidecarDefinition(tool).inputSchema),
+				},
+			]),
+		),
+	};
+}
+
+function describeToolPayload(toolKit: ToolKit, toolName: string): unknown {
+	const tool = toolKit.tools[toolName];
+	if (!tool) {
+		throw new Error(
+			`No tool "${toolName}" in toolkit "${toolKit.name}". Available: ${toolNames(toolKit)}`,
+		);
+	}
+	return {
+		toolkit: toolKit.name,
+		tool: toolName,
+		description: tool.description,
+		flags: describeToolFlags(toolToSidecarDefinition(tool).inputSchema),
+		examples: tool.examples?.map((example) => ({
+			description: example.description,
+			input: example.input,
+		})) ?? [],
+	};
+}
+
+function toolPermissionMode(
+	permissions: Permissions,
+	callbackKey: string,
+): "allow" | "deny" {
+	const scope = permissions.tool;
+	if (!scope) {
+		return "deny";
+	}
+	if (typeof scope === "string") {
+		return scope;
+	}
+	let mode: "allow" | "deny" = scope.default ?? "deny";
+	for (const rule of scope.rules) {
+		const operations = rule.operations ?? ["*"];
+		const patterns = rule.patterns ?? ["**"];
+		if (
+			operations.some((operation) => operation === "*" || operation === "invoke") &&
+			patterns.some((pattern) => permissionPatternMatches(pattern, callbackKey))
+		) {
+			mode = rule.mode;
+		}
+	}
+	return mode;
+}
+
+function permissionPatternMatches(pattern: string, value: string): boolean {
+	if (pattern === "*" || pattern === "**" || pattern === value) {
+		return true;
+	}
+	const parts = pattern.split(/(\*\*|\*)/u);
+	const source = parts
+		.map((part) => {
+			if (part === "**") return ".*";
+			if (part === "*") return "[^:]*";
+			return part.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
+		})
+		.join("");
+	return new RegExp(`^${source}$`).test(value);
+}
+
+function toolkitNames(toolKits: ToolKit[]): string {
+	return toolKits.map((toolKit) => toolKit.name).join(", ");
+}
+
+function toolNames(toolKit: ToolKit): string {
+	return Object.keys(toolKit.tools).join(", ");
+}
+
+function isHelpFlag(value: string): boolean {
+	return value === "--help" || value === "-h";
+}
+
+function jsonSchemaType(schema: unknown): string | undefined {
+	const schemaObject = asRecord(schema);
+	return typeof schemaObject.type === "string" ? schemaObject.type : undefined;
+}
+
 async function registerToolkitsOnSidecar(
 	client: NativeSidecarProcessClient,
 	session: AuthenticatedSession,
@@ -1748,22 +2343,22 @@ async function registerToolkitsOnSidecar(
 		return "";
 	}
 
-	let promptMarkdown = "";
 	for (const toolKit of toolKits) {
-		const registered = await client.registerToolkit(session, vm, {
+		await client.registerHostCallbacks(session, vm, {
 			name: toolKit.name,
 			description: toolKit.description,
-			tools: Object.fromEntries(
+			commandAliases: [`agentos-${toolKit.name}`],
+			registryCommandAliases: ["agentos"],
+			callbacks: Object.fromEntries(
 				Object.entries(toolKit.tools).map(([toolName, tool]) => [
 					toolName,
 					toolToSidecarDefinition(tool),
 				]),
 			),
 		});
-		promptMarkdown = registered.promptMarkdown;
 	}
 
-	return promptMarkdown;
+	return buildHostToolReference(toolKits);
 }
 
 export class AgentOs {
@@ -1806,6 +2401,7 @@ export class AgentOs {
 	private _cronManager!: CronManager;
 	private _toolKits: ToolKit[] = [];
 	private _toolReference = "";
+	private _permissions: Permissions = allowAll;
 	private _hostMounts: HostMountInfo[];
 	private _env: Record<string, string>;
 	private _rootFilesystem: VirtualFileSystem;
@@ -1926,9 +2522,12 @@ export class AgentOs {
 					frameTimeoutMs: NATIVE_SIDECAR_FRAME_TIMEOUT_MS,
 				});
 				const session = await client.authenticateAndOpenSession();
-				const sidecarPermissions = serializePermissionsForSidecar(
-					options?.permissions ?? allowAll,
-				);
+				const hostPermissions = options?.permissions ?? {
+					...allowAll,
+					tool: "allow",
+				};
+				const sidecarPermissions =
+					serializePermissionsForSidecar(hostPermissions);
 				const nativeVm = await client.createVm(session, {
 					runtime: "java_script",
 					metadata: {
@@ -2001,6 +2600,7 @@ export class AgentOs {
 					sidecarClient: client,
 					sidecarSession: session,
 					sidecarVm: nativeVm,
+					permissions: hostPermissions,
 					snapshotRootFilesystem: async () =>
 						createSnapshotExport(
 							convertSidecarRootSnapshotEntries(
@@ -2063,6 +2663,7 @@ export class AgentOs {
 			vm._sidecarLease = sidecarLease;
 			vm._toolKits = vmAdmin.toolKits;
 			vm._toolReference = vmAdmin.toolReference;
+			vm._permissions = vmAdmin.permissions;
 			vm._installSidecarRequestHandler();
 			vm._cronManager = new CronManager(
 				vm,
@@ -2719,7 +3320,6 @@ export class AgentOs {
 			| "configOptions"
 			| "agentCapabilities"
 			| "agentInfo"
-			| "events"
 		>,
 	): void {
 		session.processId = state.processId;
@@ -2730,17 +3330,6 @@ export class AgentOs {
 		this._applySyntheticConfigOverrides(session);
 		session.capabilities = toAgentCapabilities(state.agentCapabilities);
 		session.agentInfo = toAgentInfo(state.agentInfo);
-		session.events = mergeSequencedEvents(
-			session.events,
-			state.events.map((event) => ({
-				sequenceNumber: event.sequenceNumber,
-				notification: toJsonRpcNotification(event.notification),
-			})),
-		);
-		session.highestSequenceNumber = nextHighestSequenceNumber(
-			session.highestSequenceNumber,
-			session.events,
-		);
 	}
 
 	private _applySessionUpdate(
@@ -2777,20 +3366,12 @@ export class AgentOs {
 
 	private _recordSessionNotification(
 		session: AgentSessionEntry,
-		sequenceNumber: number,
 		notification: JsonRpcNotification,
 	): void {
-		session.events = mergeSequencedEvents(session.events, [
-			{ sequenceNumber, notification },
-		]);
-		session.highestSequenceNumber = nextHighestSequenceNumber(
-			session.highestSequenceNumber,
-			session.events,
-		);
 		this._applySessionUpdate(session, notification);
 
 		if (shouldDispatchToSessionEventHandlers(notification)) {
-			this._queueSessionEventDispatch(session);
+			this._dispatchSessionEvent(session, notification);
 		}
 
 		if (
@@ -2818,46 +3399,18 @@ export class AgentOs {
 		}
 	}
 
-	private _queueSessionEventDispatch(session: AgentSessionEntry): void {
-		if (
-			session.sessionEventDispatchScheduled ||
-			session.eventHandlers.size === 0
-		) {
-			return;
-		}
-
-		session.sessionEventDispatchScheduled = true;
-		queueMicrotask(() => {
-			session.sessionEventDispatchScheduled = false;
-			this._flushSessionEventHandlers(session);
-		});
-	}
-
-	private _flushSessionEventHandlers(session: AgentSessionEntry): void {
+	private _dispatchSessionEvent(
+		session: AgentSessionEntry,
+		notification: JsonRpcNotification,
+	): void {
 		if (session.eventHandlers.size === 0) {
 			return;
 		}
-
-		const dispatchableEvents = session.events.filter((event) =>
-			shouldDispatchToSessionEventHandlers(event.notification),
-		);
-		if (dispatchableEvents.length === 0) {
-			return;
-		}
-
 		for (const subscriber of [...session.eventHandlers]) {
-			const pendingEvents = dispatchableEvents.filter((event) =>
-				subscriber.lastDeliveredSequenceNumber === null
-					? true
-					: event.sequenceNumber > subscriber.lastDeliveredSequenceNumber,
-			);
-			for (const event of pendingEvents) {
-				try {
-					subscriber.handler(event.notification);
-				} catch {
-					// Ignore subscriber callback failures and keep event delivery moving.
-				}
-				subscriber.lastDeliveredSequenceNumber = event.sequenceNumber;
+			try {
+				subscriber.handler(notification);
+			} catch {
+				// Ignore subscriber callback failures and keep event delivery moving.
 			}
 		}
 	}
@@ -2865,36 +3418,14 @@ export class AgentOs {
 	private _subscribeSessionEvents(
 		session: AgentSessionEntry,
 		handler: SessionEventHandler,
-		options?: { replayBuffered?: boolean },
 	): () => void {
-		const replayBuffered = options?.replayBuffered !== false;
 		const subscriber: SessionEventSubscriber = {
 			handler,
-			lastDeliveredSequenceNumber: replayBuffered
-				? null
-				: latestBufferedSessionEventSequence(session.events),
 		};
-
-		if (replayBuffered) {
-			for (const event of session.events) {
-				if (!shouldDispatchToSessionEventHandlers(event.notification)) {
-					continue;
-				}
-				handler(event.notification);
-				subscriber.lastDeliveredSequenceNumber = event.sequenceNumber;
-			}
-		}
-
 		session.eventHandlers.add(subscriber);
 		return () => {
 			session.eventHandlers.delete(subscriber);
 		};
-	}
-
-	private _nextSyntheticSequenceNumber(session: AgentSessionEntry): number {
-		return (
-			Math.min(0, ...session.events.map((event) => event.sequenceNumber)) - 1
-		);
 	}
 
 	private _applySyntheticConfigOverrides(session: AgentSessionEntry): void {
@@ -2914,23 +3445,6 @@ export class AgentOs {
 		});
 	}
 
-	private _recordSyntheticConfigUpdate(session: AgentSessionEntry): void {
-		this._recordSessionNotification(
-			session,
-			this._nextSyntheticSequenceNumber(session),
-			{
-				jsonrpc: "2.0",
-				method: "session/update",
-				params: {
-					update: {
-						sessionUpdate: "config_option_update",
-						configOptions: session.configOptions,
-					},
-				},
-			},
-		);
-	}
-
 	private _handleSidecarEvent(
 		event: Parameters<NativeSidecarProcessClient["onEvent"]>[0] extends (
 			event: infer T,
@@ -2938,6 +3452,10 @@ export class AgentOs {
 			? T
 			: never,
 	): void {
+		if (event.payload.type === "ext") {
+			this._handleAcpExtEvent(event.payload.envelope);
+			return;
+		}
 		if (event.payload.type !== "structured") {
 			return;
 		}
@@ -2951,11 +3469,6 @@ export class AgentOs {
 			return;
 		}
 
-		const sequenceNumber = Number(event.payload.detail.sequence_number);
-		if (!Number.isInteger(sequenceNumber)) {
-			return;
-		}
-
 		const notificationText = event.payload.detail.notification;
 		if (typeof notificationText !== "string") {
 			return;
@@ -2964,9 +3477,35 @@ export class AgentOs {
 		try {
 			this._recordSessionNotification(
 				session,
-				sequenceNumber,
 				toJsonRpcNotification(JSON.parse(notificationText)),
 			);
+		} catch {
+			// Ignore malformed event payloads from the sidecar.
+		}
+	}
+
+	private _handleAcpExtEvent(envelope: {
+		namespace: string;
+		payload: Uint8Array;
+	}): void {
+		if (envelope.namespace !== ACP_EXTENSION_NAMESPACE) {
+			return;
+		}
+		try {
+			const event = decodeAcpEvent(envelope.payload);
+			switch (event.tag) {
+				case "AcpSessionEvent": {
+					const session = this._sessions.get(event.val.sessionId);
+					if (!session) {
+						return;
+					}
+					this._recordSessionNotification(
+						session,
+						toJsonRpcNotification(JSON.parse(event.val.notification)),
+					);
+					return;
+				}
+			}
 		} catch {
 			// Ignore malformed event payloads from the sidecar.
 		}
@@ -2990,6 +3529,29 @@ export class AgentOs {
 		};
 	}
 
+	private async _sendAcpRequest(request: AcpRequest): Promise<AcpResponse> {
+		const envelope = await this._sidecarClient.extensionRequest(
+			this._sidecarSession,
+			this._sidecarVm,
+			{
+				namespace: ACP_EXTENSION_NAMESPACE,
+				payload: encodeAcpRequest(request),
+			},
+		);
+		if (envelope.namespace !== ACP_EXTENSION_NAMESPACE) {
+			throw new Error(`unexpected ACP Ext namespace: ${envelope.namespace}`);
+		}
+		const response = decodeAcpResponse(envelope.payload);
+		if (response.tag === "AcpErrorResponse") {
+			const error = new Error(response.val.message) as Error & {
+				code?: string;
+			};
+			error.code = response.val.code;
+			throw error;
+		}
+		return response;
+	}
+
 	private async _sendSessionRequest(
 		sessionId: string,
 		method: string,
@@ -3008,11 +3570,21 @@ export class AgentOs {
 			resolvers.add(resolver);
 			this._pendingSessionRequestResolvers.set(sessionId, resolvers);
 
-			void this._sidecarClient
-				.sessionRequest(this._sidecarSession, this._sidecarVm, {
+			void this._sendAcpRequest({
+				tag: "AcpSessionRequest",
+				val: {
 					sessionId,
 					method,
-					params,
+					params: params === undefined ? null : JSON.stringify(params),
+				},
+			})
+				.then((response) => {
+					if (response.tag !== "AcpSessionRpcResponse") {
+						throw new Error(
+							`unexpected response to AcpSessionRequest: ${response.tag}`,
+						);
+					}
+					return toJsonRpcResponse(JSON.parse(response.val.response));
 				})
 				.then(resolve, reject)
 				.finally(() => {
@@ -3048,6 +3620,13 @@ export class AgentOs {
 				typeof params?.value === "string"
 			) {
 				const nextValue = params.value;
+				const updatedOption = session.configOptions.find(
+					(option) => option.id === params.configId,
+				);
+				session.configOverrides.set(params.configId, nextValue);
+				if (typeof updatedOption?.category === "string") {
+					session.configOverrides.set(updatedOption.category, nextValue);
+				}
 				session.configOptions = session.configOptions.map((option) =>
 					option.id === params.configId
 						? { ...option, currentValue: nextValue }
@@ -3140,6 +3719,12 @@ export class AgentOs {
 		if (!session) {
 			return;
 		}
+		this._rejectPendingPermissionRepliesFromSession(session);
+	}
+
+	private _rejectPendingPermissionRepliesFromSession(
+		session: AgentSessionEntry,
+	): void {
 		for (const [
 			permissionId,
 			pendingReply,
@@ -3168,8 +3753,17 @@ export class AgentOs {
 		this._removeSession(sessionId);
 		this._closedSessionIds.add(sessionId);
 
-		const closePromise = this._sidecarClient
-			.closeAgentSession(this._sidecarSession, this._sidecarVm, sessionId)
+		const closePromise = this._sendAcpRequest({
+			tag: "AcpCloseSessionRequest",
+			val: { sessionId },
+		})
+			.then((response) => {
+				if (response.tag !== "AcpSessionClosedResponse") {
+					throw new Error(
+						`unexpected response to AcpCloseSessionRequest: ${response.tag}`,
+					);
+				}
+			})
 			.finally(() => {
 				this._sessionClosePromises.delete(sessionId);
 			});
@@ -3180,18 +3774,16 @@ export class AgentOs {
 	private async _hydrateSessionState(
 		session: AgentSessionEntry,
 	): Promise<void> {
-		const state = await this._sidecarClient.getSessionState(
-			this._sidecarSession,
-			this._sidecarVm,
-			session.sessionId,
-			{
-				...(session.highestSequenceNumber !== null
-					? {
-							acknowledgedSequenceNumber: session.highestSequenceNumber,
-						}
-					: {}),
-			},
-		);
+		const response = await this._sendAcpRequest({
+			tag: "AcpGetSessionStateRequest",
+			val: { sessionId: session.sessionId },
+		});
+		if (response.tag !== "AcpSessionStateResponse") {
+			throw new Error(
+				`unexpected response to AcpGetSessionStateRequest: ${response.tag}`,
+			);
+		}
+		const state = sidecarSessionStateFromAcp(response.val);
 		this._syncSessionState(session, state);
 	}
 
@@ -3205,7 +3797,7 @@ export class AgentOs {
 		}
 
 		// System-prompt assembly and injection (launch args / OPENCODE_CONTEXTPATHS) are owned by
-		// the sidecar at CreateSession. The host only forwards additionalInstructions /
+		// the sidecar at AcpCreateSessionRequest. The host only forwards additionalInstructions /
 		// skipOsInstructions plus the agent's static launch args and env.
 		const launchArgs = [...(config.launchArgs ?? [])];
 		let launchEnv = { ...config.defaultEnv, ...options?.env };
@@ -3221,23 +3813,29 @@ export class AgentOs {
 			};
 		}
 
-		const created = await this._sidecarClient.createSession(
-			this._sidecarSession,
-			this._sidecarVm,
-			{
+		const response = await this._sendAcpRequest({
+			tag: "AcpCreateSessionRequest",
+			val: {
 				agentType: String(agentType),
-				runtime: "java_script",
+				runtime: AcpRuntimeKind.JavaScript,
 				adapterEntrypoint,
 				args: launchArgs,
-				env: launchEnv,
+				env: new Map(Object.entries(launchEnv)),
 				cwd: sessionCwd,
-				mcpServers: options?.mcpServers ?? [],
+				mcpServers: JSON.stringify(options?.mcpServers ?? []),
 				protocolVersion: ACP_PROTOCOL_VERSION,
-				clientCapabilities: defaultAcpClientCapabilities(),
-				additionalInstructions: options?.additionalInstructions,
+				clientCapabilities: JSON.stringify(defaultAcpClientCapabilities()),
+				additionalInstructions: combineInstructions(
+					options?.additionalInstructions,
+					this._toolReference,
+				),
 				skipOsInstructions: options?.skipOsInstructions ?? false,
 			},
-		);
+		});
+		if (response.tag !== "AcpSessionCreatedResponse") {
+			throw new Error(`unexpected create_session response: ${response.tag}`);
+		}
+		const created = sidecarSessionCreatedFromAcp(response.val);
 
 		const initData: SessionInitData = {
 			modes: toSessionModes(created.modes) ?? undefined,
@@ -3308,32 +3906,84 @@ export class AgentOs {
 	}
 
 	private _installSidecarRequestHandler(): void {
-		const toolMap = buildToolMap(this._toolKits);
+		const context: HostCallbackContext = {
+			toolKits: this._toolKits,
+			toolMap: buildToolMap(this._toolKits),
+			permissions: this._permissions,
+			readFile: (path) => this.readFile(path),
+		};
 		this._sidecarClient.setSidecarRequestHandler((request) => {
 			switch (request.payload.type) {
-				case "tool_invocation":
-					return handleToolInvocation(request, toolMap);
-				case "permission_request":
-					return this._handlePermissionSidecarRequest(request);
-				case "acp_request":
-					return this._handleAcpSidecarRequest(request.payload.request);
+				case "host_callback":
+					return handleHostCallback(request, context);
 				case "js_bridge_call":
 					return Promise.resolve({
 						type: "js_bridge_result",
 						call_id: request.payload.call_id,
 						error: `unsupported sidecar request type: ${request.payload.type}`,
 					});
+				case "ext":
+					return this._handleAcpExtSidecarRequest(request.payload.envelope);
 			}
 		});
 	}
 
-	private async _handleAcpSidecarRequest(
-		request: JsonRpcRequest,
-	): Promise<SidecarResponsePayload> {
-		return {
-			type: "acp_request_result",
-			response: await this._dispatchAcpSidecarRequest(request),
-		};
+	private async _handleAcpExtSidecarRequest(envelope: {
+		namespace: string;
+		payload: Uint8Array;
+	}): Promise<SidecarResponsePayload> {
+		if (envelope.namespace !== ACP_EXTENSION_NAMESPACE) {
+			return {
+				type: "ext_result",
+				envelope: {
+					namespace: envelope.namespace,
+					payload: Buffer.from("unknown extension namespace", "utf8"),
+				},
+			};
+		}
+		const callback = decodeAcpCallback(envelope.payload);
+		switch (callback.tag) {
+			case "AcpPermissionCallback": {
+				const reply = await this._handleAcpPermissionCallback(
+					callback.val.sessionId,
+					callback.val.permissionId,
+					{
+						...toRecord(JSON.parse(callback.val.params)),
+						_acpMethod: ACP_PERMISSION_METHOD,
+					},
+				);
+				return {
+					type: "ext_result",
+					envelope: {
+						namespace: ACP_EXTENSION_NAMESPACE,
+						payload: encodeAcpCallbackResponse({
+							tag: "AcpPermissionCallbackResponse",
+							val: {
+								permissionId: callback.val.permissionId,
+								reply,
+							},
+						}),
+					},
+				};
+			}
+			case "AcpHostRequestCallback": {
+				const response = await this._dispatchAcpSidecarRequest(
+					toJsonRpcRequest(JSON.parse(callback.val.request)),
+				);
+				return {
+					type: "ext_result",
+					envelope: {
+						namespace: ACP_EXTENSION_NAMESPACE,
+						payload: encodeAcpCallbackResponse({
+							tag: "AcpHostRequestCallbackResponse",
+							val: {
+								response: JSON.stringify(response),
+							},
+						}),
+					},
+				};
+			}
+		}
 	}
 
 	private async _dispatchAcpSidecarRequest(
@@ -3532,25 +4182,6 @@ export class AgentOs {
 		});
 
 		return this._buildAcpPermissionResult(reply, permissionParams);
-	}
-
-	private _handleUnsupportedAcpSidecarRequest(
-		request: JsonRpcRequest,
-	): SidecarResponsePayload {
-		return {
-			type: "acp_request_result",
-			response: {
-				jsonrpc: "2.0",
-				id: request.id,
-				error: {
-					code: -32601,
-					message: `Method not found: ${request.method}`,
-					data: {
-						method: request.method,
-					},
-				},
-			},
-		};
 	}
 
 	private _acpParams(request: JsonRpcRequest): Record<string, unknown> {
@@ -3930,54 +4561,38 @@ export class AgentOs {
 		return null;
 	}
 
-	private async _handlePermissionSidecarRequest(
-		request: SidecarRequestFrame,
-	): Promise<SidecarResponsePayload> {
-		const payload = request.payload;
-		if (payload.type !== "permission_request") {
-			return {
-				type: "permission_request_result",
-				permission_id: "unknown",
-				error: `unsupported sidecar request type: ${payload.type}`,
-			};
-		}
-
-		const session = this._sessions.get(payload.session_id);
+	private async _handleAcpPermissionCallback(
+		sessionId: string,
+		permissionId: string,
+		params: Record<string, unknown>,
+	): Promise<PermissionReply> {
+		const session = this._sessions.get(sessionId);
 		if (!session) {
-			return {
-				type: "permission_request_result",
-				permission_id: payload.permission_id,
-				error: `Session not found: ${payload.session_id}`,
-			};
+			return "reject";
 		}
 
 		if (session.permissionHandlers.size === 0) {
-			return {
-				type: "permission_request_result",
-				permission_id: payload.permission_id,
-				reply: "reject",
-			};
+			return "reject";
 		}
 
-		const params = toRecord(payload.params);
 		try {
-			const reply = await new Promise<PermissionReply>((resolve, reject) => {
+			return await new Promise<PermissionReply>((resolve, reject) => {
 				const timer = setTimeout(() => {
-					session.pendingPermissionReplies.delete(payload.permission_id);
+					session.pendingPermissionReplies.delete(permissionId);
 					reject(
 						new Error(
-							`Timed out waiting for permission reply: ${payload.permission_id}`,
+							`Timed out waiting for permission reply: ${permissionId}`,
 						),
 					);
 				}, 120_000);
-				session.pendingPermissionReplies.set(payload.permission_id, {
+				session.pendingPermissionReplies.set(permissionId, {
 					resolve,
 					reject,
 					timer,
 				});
 
 				const permissionRequest: PermissionRequest = {
-					permissionId: payload.permission_id,
+					permissionId,
 					description:
 						typeof params.description === "string"
 							? params.description
@@ -3988,18 +4603,8 @@ export class AgentOs {
 					handler(permissionRequest);
 				}
 			});
-
-			return {
-				type: "permission_request_result",
-				permission_id: payload.permission_id,
-				reply,
-			};
-		} catch (error) {
-			return {
-				type: "permission_request_result",
-				permission_id: payload.permission_id,
-				error: validationMessage(error),
-			};
+		} catch {
+			return "reject";
 		}
 	}
 
@@ -4012,15 +4617,6 @@ export class AgentOs {
 			this._softwareAgentConfigs.get(agentType) ??
 			(AGENT_CONFIGS as Record<string, AgentConfig>)[agentType]
 		);
-	}
-
-	/**
-	 * Verify a session exists and is active.
-	 * Throws if the session is not found.
-	 */
-	resumeSession(sessionId: string): { sessionId: string } {
-		this._requireSession(sessionId);
-		return { sessionId };
 	}
 
 	/**
@@ -4053,9 +4649,7 @@ export class AgentOs {
 				}
 			}
 		};
-		const unsubscribe = this._subscribeSessionEvents(session, handler, {
-			replayBuffered: false,
-		});
+		const unsubscribe = this._subscribeSessionEvents(session, handler);
 
 		try {
 			const response = await this._sendSessionRequest(
@@ -4074,15 +4668,16 @@ export class AgentOs {
 	/** Cancel ongoing agent work for a session. */
 	async cancelSession(sessionId: string): Promise<JsonRpcResponse> {
 		this._requireSession(sessionId);
-		const cancelledPendingPrompt =
-			this._cancelPendingPromptRequests(sessionId);
+		const cancelledPendingPrompt = this._cancelPendingPromptRequests(sessionId);
 		if (cancelledPendingPrompt) {
 			// Session control requests share the same framed sidecar transport as an
 			// in-flight prompt request. If the adapter is blocked in prompt I/O, a
 			// synchronous cancel RPC can wedge behind that prompt until the transport
 			// timeout fires. Resolve the local prompt immediately, then let the sidecar
 			// cancellation continue in the background as best effort.
-			void this._sendSessionRequest(sessionId, "session/cancel").catch(() => {});
+			void this._sendSessionRequest(sessionId, "session/cancel").catch(
+				() => {},
+			);
 			return {
 				jsonrpc: "2.0",
 				id: null,
@@ -4093,7 +4688,22 @@ export class AgentOs {
 				},
 			};
 		}
-		return this._sendSessionRequest(sessionId, "session/cancel");
+		const response = await this._sendSessionRequest(
+			sessionId,
+			"session/cancel",
+		);
+		if (response.error?.code === -32601) {
+			return {
+				jsonrpc: "2.0",
+				id: null,
+				result: {
+					cancelled: false,
+					requested: true,
+					via: "unsupported",
+				},
+			};
+		}
+		return response;
 	}
 
 	closeSession(sessionId: string): void {
@@ -4109,22 +4719,6 @@ export class AgentOs {
 		// rejections here and let tracked close promises surface errors to any
 		// internal/test callers awaiting `_sessionClosePromises`.
 		void closePromise.catch(() => {});
-	}
-
-	getSessionEvents(
-		sessionId: string,
-		options?: GetEventsOptions,
-	): SequencedEvent[] {
-		let events = cloneSequencedEvents(this._requireSession(sessionId).events);
-		if (options?.since !== undefined) {
-			events = events.filter((event) => event.sequenceNumber > options.since!);
-		}
-		if (options?.method !== undefined) {
-			events = events.filter(
-				(event) => event.notification.method === options.method,
-			);
-		}
-		return events;
 	}
 
 	async respondPermission(

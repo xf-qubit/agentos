@@ -26,9 +26,9 @@ export interface OverlayBackendOptions {
 	mode?: "ephemeral" | "read-only";
 }
 
-const OVERLAY_METADATA_ROOT = "/.agent-os-overlay";
-const OVERLAY_WHITEOUT_DIR = "/.agent-os-overlay/whiteouts";
-const OVERLAY_OPAQUE_DIR = "/.agent-os-overlay/opaque";
+const OVERLAY_METADATA_ROOT = "/.secure-exec-overlay";
+const OVERLAY_WHITEOUT_DIR = "/.secure-exec-overlay/whiteouts";
+const OVERLAY_OPAQUE_DIR = "/.secure-exec-overlay/opaque";
 
 type OverlayMarkerKind = "whiteout" | "opaque";
 

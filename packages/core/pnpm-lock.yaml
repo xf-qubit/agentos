@@ -57,40 +57,40 @@ importers:
       '@rivet-dev/agent-os-claude':
         specifier: link:../../registry/agent/claude
         version: link:../../registry/agent/claude
-      '@rivet-dev/agent-os-codex':
+      '@secure-exec/codex':
         specifier: link:../../registry/software/codex
         version: link:../../registry/software/codex
       '@rivet-dev/agent-os-codex-agent':
         specifier: link:../../registry/agent/codex
         version: link:../../registry/agent/codex
-      '@rivet-dev/agent-os-coreutils':
+      '@secure-exec/coreutils':
         specifier: link:../../registry/software/coreutils
         version: link:../../registry/software/coreutils
-      '@rivet-dev/agent-os-curl':
+      '@secure-exec/curl':
         specifier: link:../../registry/software/curl
         version: link:../../registry/software/curl
-      '@rivet-dev/agent-os-diffutils':
+      '@secure-exec/diffutils':
         specifier: link:../../registry/software/diffutils
         version: link:../../registry/software/diffutils
-      '@rivet-dev/agent-os-fd':
+      '@secure-exec/fd':
         specifier: link:../../registry/software/fd
         version: link:../../registry/software/fd
-      '@rivet-dev/agent-os-file':
+      '@secure-exec/file':
         specifier: link:../../registry/software/file
         version: link:../../registry/software/file
-      '@rivet-dev/agent-os-findutils':
+      '@secure-exec/findutils':
         specifier: link:../../registry/software/findutils
         version: link:../../registry/software/findutils
-      '@rivet-dev/agent-os-gawk':
+      '@secure-exec/gawk':
         specifier: link:../../registry/software/gawk
         version: link:../../registry/software/gawk
-      '@rivet-dev/agent-os-grep':
+      '@secure-exec/grep':
         specifier: link:../../registry/software/grep
         version: link:../../registry/software/grep
-      '@rivet-dev/agent-os-gzip':
+      '@secure-exec/gzip':
         specifier: link:../../registry/software/gzip
         version: link:../../registry/software/gzip
-      '@rivet-dev/agent-os-jq':
+      '@secure-exec/jq':
         specifier: link:../../registry/software/jq
         version: link:../../registry/software/jq
       '@rivet-dev/agent-os-opencode':
@@ -102,19 +102,19 @@ importers:
       '@rivet-dev/agent-os-pi-cli':
         specifier: link:../../registry/agent/pi-cli
         version: link:../../registry/agent/pi-cli
-      '@rivet-dev/agent-os-ripgrep':
+      '@secure-exec/ripgrep':
         specifier: link:../../registry/software/ripgrep
         version: link:../../registry/software/ripgrep
-      '@rivet-dev/agent-os-sed':
+      '@secure-exec/sed':
         specifier: link:../../registry/software/sed
         version: link:../../registry/software/sed
-      '@rivet-dev/agent-os-tar':
+      '@secure-exec/tar':
         specifier: link:../../registry/software/tar
         version: link:../../registry/software/tar
-      '@rivet-dev/agent-os-tree':
+      '@secure-exec/tree':
         specifier: link:../../registry/software/tree
         version: link:../../registry/software/tree
-      '@rivet-dev/agent-os-yq':
+      '@secure-exec/yq':
         specifier: link:../../registry/software/yq
         version: link:../../registry/software/yq
       '@types/node':

@@ -3,10 +3,10 @@
  *
  * Discovery order matters: platform-specific packages are returned first so
  * they land on npm before the meta package that lists them as
- * `optionalDependencies`. `@rivet-dev/agent-os-sidecar` (the meta package users
- * install) resolves the platform-specific binary package for the current host
- * at install time via npm `os`/`cpu`/`libc`, so those platform packages must
- * exist on the registry before anyone installs the meta.
+ * `optionalDependencies`. The sidecar meta packages users install resolve the
+ * platform-specific binary package for the current host at install time via npm
+ * `os`/`cpu`/`libc`, so those platform packages must exist on the registry
+ * before anyone installs the meta.
  */
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
@@ -37,7 +37,6 @@ export const EXCLUDED = new Set<string>([
 	"@rivet-dev/agent-os-playground",
 	"@rivet-dev/agent-os-shell",
 	"@rivet-dev/agent-os-quickstart",
-	"@rivet-dev/agent-os-registry-types",
 	"secure-exec",
 	"@secure-exec/typescript",
 	"publish",
@@ -64,6 +63,18 @@ export const META_PACKAGES: readonly MetaPackageSpec[] = [
 		platformPrefix: "@rivet-dev/agent-os-sidecar-",
 	},
 ];
+
+const SIDECAR_BINARY_PACKAGE_DIRS = [
+	"packages/sidecar-binary/npm",
+	"packages/sidecar/npm",
+] as const;
+
+export const SECURE_EXEC_WORKSPACE_PACKAGES = new Set([
+	"@secure-exec/browser",
+	"@secure-exec/google-drive",
+	"@secure-exec/s3",
+	"@secure-exec/sandbox",
+]);
 
 /**
  * Platforms whose sidecar binary package is built and published. Kept in sync
@@ -125,19 +136,21 @@ export function discoverPackages(
 	//    the meta package resolves at install time. Only the allowlisted
 	//    platforms are included so unbuilt platform dirs are never published.
 	const platformAllowlist = new Set(sidecarPlatforms());
-	const npmDir = join(repoRoot, "packages/sidecar-binary/npm");
-	if (existsSync(npmDir)) {
-		for (const entry of readdirSync(npmDir).sort()) {
-			if (!platformAllowlist.has(entry)) continue;
-			const platDir = join(npmDir, entry);
-			if (!statSync(platDir).isDirectory()) continue;
-			add(platDir);
+	for (const packageDir of SIDECAR_BINARY_PACKAGE_DIRS) {
+		const npmDir = join(repoRoot, packageDir);
+		if (existsSync(npmDir)) {
+			for (const entry of readdirSync(npmDir).sort()) {
+				if (!platformAllowlist.has(entry)) continue;
+				const platDir = join(npmDir, entry);
+				if (!statSync(platDir).isDirectory()) continue;
+				add(platDir);
+			}
 		}
 	}
 
-	// 2. pnpm workspace packages (@rivet-dev/agent-os-*). Skip the
-	//    registry/software/* WASM command packages — they are built and shipped
-	//    separately, never published to npm from this flow.
+	// 2. pnpm workspace packages. Skip the registry/software/* WASM command
+	//    packages. They are built and shipped separately, never published to npm
+	//    from this flow.
 	const pnpmList = execSync("pnpm -r list --json --depth -1", {
 		cwd: repoRoot,
 		encoding: "utf8",
@@ -150,7 +163,12 @@ export function discoverPackages(
 	}> = JSON.parse(pnpmList);
 	for (const p of workspacePkgs) {
 		if (!p.name) continue;
-		if (!p.name.startsWith("@rivet-dev/agent-os-")) continue;
+		if (
+			!p.name.startsWith("@rivet-dev/agent-os-") &&
+			!SECURE_EXEC_WORKSPACE_PACKAGES.has(p.name)
+		) {
+			continue;
+		}
 		if (p.path.includes("/registry/software/")) continue;
 		add(p.path);
 	}
@@ -183,16 +201,39 @@ export function buildMetaPlatformMap(
  */
 export function assertDiscoverySanity(packages: Package[]): void {
 	const byName = new Set(packages.map((p) => p.name));
-	const required = ["@rivet-dev/agent-os-core", "@rivet-dev/agent-os-sidecar"];
+	const hasAgentOsPackages = packages.some((p) =>
+		p.name.startsWith("@rivet-dev/agent-os-"),
+	);
+	const hasSecureExecPackages = packages.some((p) =>
+		p.name.startsWith("@secure-exec/"),
+	);
+	const required: string[] = [];
+	if (hasAgentOsPackages) {
+		required.push(
+			"@rivet-dev/agent-os-core",
+			"@rivet-dev/agent-os-sidecar",
+		);
+	}
+	if (hasSecureExecPackages) {
+		required.push(
+			"@secure-exec/google-drive",
+			"@secure-exec/s3",
+			"@secure-exec/sandbox",
+		);
+	}
+	if (hasSecureExecPackages && !hasAgentOsPackages) {
+		required.push("@secure-exec/browser");
+	}
 	const missing = required.filter((r) => !byName.has(r));
 	if (missing.length > 0) {
 		throw new Error(
 			`package discovery missing required packages: ${missing.join(", ")}`,
 		);
 	}
-	// Each meta must have at least one platform package.
+	// Each discovered meta package must have at least one platform package.
 	const metaMap = buildMetaPlatformMap(packages);
 	for (const { meta } of META_PACKAGES) {
+		if (!byName.has(meta)) continue;
 		const plats = metaMap.get(meta) ?? [];
 		if (plats.length === 0) {
 			throw new Error(

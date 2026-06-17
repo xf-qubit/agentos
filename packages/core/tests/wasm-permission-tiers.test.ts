@@ -61,7 +61,7 @@ describe("WASM command permission tiers", () => {
 			env: { HOME: "/workspace" },
 			cwd: "/workspace",
 			localMounts: [],
-			commandGuestPaths: new Map([["grep", "/__agentos/commands/000/grep"]]),
+			commandGuestPaths: new Map([["grep", "/__secure_exec/commands/000/grep"]]),
 		});
 
 		const proc = proxy.spawn("grep", ["needle", "haystack.txt"], {
@@ -92,7 +92,7 @@ describe("WASM command permission tiers", () => {
 			env: { HOME: "/workspace" },
 			cwd: "/workspace",
 			localMounts: [],
-			commandGuestPaths: new Map([["echo", "/__agentos/commands/000/echo"]]),
+			commandGuestPaths: new Map([["echo", "/__secure_exec/commands/000/echo"]]),
 		});
 
 		// Shell grammar belongs to the guest shell. Without a guest sh command the

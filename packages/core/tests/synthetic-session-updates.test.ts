@@ -179,34 +179,23 @@ describe("synthetic session/update compatibility", () => {
 				}
 			});
 
-			await vm.setSessionModel(sessionId, "gpt-5.4");
+			await vm.setSessionModel(sessionId, "gpt-5-codex");
 			await vm.setSessionThoughtLevel(sessionId, "high");
 			await vm.setSessionMode(sessionId, "plan");
+			await new Promise<void>((resolve) => queueMicrotask(resolve));
 			unsubscribe();
 
 			expect(vm.getSessionModes(sessionId)?.currentModeId).toBe("plan");
 			const configOptions = vm.getSessionConfigOptions(sessionId);
 			expect(
-				configOptions.find((option) => option.category === "model")?.currentValue,
-			).toBe("gpt-5.4");
+				configOptions.find((option) => option.category === "model")
+					?.currentValue,
+			).toBe("gpt-5-codex");
 			expect(
 				configOptions.find((option) => option.category === "thought_level")
 					?.currentValue,
 			).toBe("high");
 
-			const sessionUpdateEvents = vm
-				.getSessionEvents(sessionId)
-				.map((entry) => JSON.stringify(entry.notification.params));
-			expect(
-				sessionUpdateEvents.some((event) =>
-					event.includes('"sessionUpdate":"current_mode_update"'),
-				),
-			).toBe(true);
-			expect(
-				sessionUpdateEvents.filter((event) =>
-					event.includes('"sessionUpdate":"config_option_update"'),
-				).length,
-			).toBeGreaterThanOrEqual(2);
 			expect(
 				receivedEvents.some((event) =>
 					event.includes('"sessionUpdate":"current_mode_update"'),

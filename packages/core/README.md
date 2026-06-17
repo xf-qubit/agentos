@@ -114,7 +114,6 @@ await vm.dispose();
 |--------|-----------|-------------|
 | `createSession` | `createSession(agentType: AgentType \| string, options?: CreateSessionOptions): Promise<{ sessionId: string }>` | Launch an agent and return a session ID |
 | `listSessions` | `listSessions(): SessionInfo[]` | List active sessions |
-| `resumeSession` | `resumeSession(sessionId: string): { sessionId: string }` | Confirm and return an active session ID |
 | `destroySession` | `destroySession(sessionId: string): Promise<void>` | Gracefully cancel and close a session |
 
 ### Agent Registry
@@ -138,7 +137,6 @@ await vm.dispose();
 | `setSessionModel` | `setSessionModel(sessionId: string, model: string): Promise<JsonRpcResponse>` | Set the model |
 | `setSessionThoughtLevel` | `setSessionThoughtLevel(sessionId: string, level: string): Promise<JsonRpcResponse>` | Set reasoning level |
 | `getSessionConfigOptions` | `getSessionConfigOptions(sessionId: string): SessionConfigOption[]` | Get available config options |
-| `getSessionEvents` | `getSessionEvents(sessionId: string, options?: GetEventsOptions): SequencedEvent[]` | Get event history with sequence numbers |
 | `rawSend` | `rawSend(sessionId: string, method: string, params?: Record<string, unknown>): Promise<JsonRpcResponse>` | Send an arbitrary ACP request |
 
 ### Exported Types
@@ -161,8 +159,8 @@ await vm.dispose();
 - `MountConfigOverlay` — Copy-on-write overlay (lower + upper layers)
 
 **Companion Filesystem Packages**
-- `createGoogleDriveBackend()` — Declarative Google Drive native mount helper from `@rivet-dev/agent-os-google-drive`
-- `createS3Backend()` — Declarative S3-compatible native mount helper from `@rivet-dev/agent-os-s3`
+- `createGoogleDriveBackend()` — Declarative Google Drive native mount helper from `@secure-exec/google-drive`
+- `createS3Backend()` — Declarative S3-compatible native mount helper from `@secure-exec/s3`
 
 **MCP Servers**
 - `McpServerConfig` — Union of local and remote MCP configs
@@ -197,9 +195,7 @@ await vm.dispose();
 - `PermissionRequest` — Permission request from an agent
 - `PermissionReply` — `"once" | "always" | "reject"`
 - `PermissionRequestHandler` — Handler for permission requests
-- `SessionEventHandler` — Handler for session update events
-- `SequencedEvent` — Notification with sequence number
-- `GetEventsOptions` — Filter options for event history (since, method)
+- `SessionEventHandler` — Handler for live session update events
 
 **Protocol**
 - `JsonRpcRequest`, `JsonRpcResponse`, `JsonRpcNotification`, `JsonRpcError`

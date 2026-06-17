@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import curlPackage from "@rivet-dev/agent-os-curl";
+import curlPackage from "@agent-os-pkgs/curl";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { AgentOs } from "../src/index.js";
 import { REGISTRY_SOFTWARE } from "./helpers/registry-commands.js";
@@ -255,12 +255,14 @@ EOF`);
 			const bash = await vm.exec("which bash");
 			expect(bash.exitCode).toBe(0);
 			expect(bash.stdout.trim()).toMatch(
-				/^\/(?:bin|__agentos\/commands\/\d+)\/bash$/,
+				/^\/(?:bin|__secure_exec\/commands\/\d+)\/bash$/,
 			);
 
 			const rg = await vm.exec("which rg");
 			expect(rg.exitCode).toBe(0);
-			expect(rg.stdout.trim()).toMatch(/^\/(?:bin|__agentos\/commands\/\d+)\/rg$/);
+			expect(rg.stdout.trim()).toMatch(
+				/^\/(?:bin|__secure_exec\/commands\/\d+)\/rg$/,
+			);
 
 			const missing = await vm.exec("which definitely-not-a-command");
 			expect(missing.exitCode).toBeGreaterThan(0);

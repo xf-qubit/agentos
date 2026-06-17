@@ -1,13 +1,11 @@
 import { resolve } from "node:path";
 import type { Fixture, ToolCall } from "@copilotkit/llmock";
-import common from "@rivet-dev/agent-os-common";
+import common from "@agent-os-pkgs/common";
 import pi from "@rivet-dev/agent-os-pi";
 import { describe, expect, test } from "vitest";
 import type { AgentCapabilities, AgentInfo } from "../src/agent-os.js";
 import { AgentOs } from "../src/agent-os.js";
-import {
-	hasRegistryCommands,
-} from "./helpers/registry-commands.js";
+import { hasRegistryCommands } from "./helpers/registry-commands.js";
 import {
 	createAnthropicFixture,
 	startLlmock,
@@ -105,9 +103,9 @@ describe("full createSession('pi') inside the VM", () => {
 			).sessionId;
 
 			expect(sessionId).toBeTruthy();
-			expect(vm.listSessions().some((entry) => entry.sessionId === sessionId)).toBe(
-				true,
-			);
+			expect(
+				vm.listSessions().some((entry) => entry.sessionId === sessionId),
+			).toBe(true);
 		} finally {
 			if (sessionId) {
 				vm.closeSession(sessionId);
@@ -165,21 +163,25 @@ describe("full createSession('pi') inside the VM", () => {
 			expect(modes?.currentModeId).toBeTruthy();
 			expect(modes?.availableModes.length).toBeGreaterThan(0);
 
+			const events: { method: string; params?: unknown }[] = [];
+			const unsubscribeEvents = vm.onSessionEvent(sessionId, (event) => {
+				events.push(event);
+			});
 			const { response, text } = await vm.prompt(
 				sessionId,
 				"Create notes.txt with the text hello from pi write.",
 			);
+			unsubscribeEvents();
 
 			expect(response.error).toBeUndefined();
 			expect(text).toContain("notes.txt was created successfully.");
 			expect(
-				new TextDecoder().decode(await vm.readFile(`${workspaceDir}/notes.txt`)),
+				new TextDecoder().decode(
+					await vm.readFile(`${workspaceDir}/notes.txt`),
+				),
 			).toBe("hello from pi write");
 			expect(mock.getRequests().length).toBeGreaterThanOrEqual(2);
 
-			const events = vm
-				.getSessionEvents(sessionId)
-				.map((event) => event.notification);
 			expect(
 				events.some(
 					(event) =>
@@ -191,7 +193,7 @@ describe("full createSession('pi') inside the VM", () => {
 				events.some(
 					(event) =>
 						event.method === "session/update" &&
-						JSON.stringify(event.params).includes("\"completed\""),
+						JSON.stringify(event.params).includes('"completed"'),
 				),
 			).toBe(true);
 		} finally {

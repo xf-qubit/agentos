@@ -23,15 +23,9 @@ function createTrackedAgent(initialTexts: string[] = []) {
 		_sessions: Map<string, unknown>;
 		_recordSessionNotification: (
 			session: Record<string, unknown>,
-			sequenceNumber: number,
 			notification: ReturnType<typeof createSessionUpdateNotification>,
 		) => void;
 	};
-
-	const events = initialTexts.map((text, index) => ({
-		sequenceNumber: index + 1,
-		notification: createSessionUpdateNotification(text),
-	}));
 
 	const trackedSession = {
 		sessionId: SESSION_ID,
@@ -43,10 +37,7 @@ function createTrackedAgent(initialTexts: string[] = []) {
 		configOptions: [],
 		capabilities: {},
 		agentInfo: null,
-		highestSequenceNumber: events.at(-1)?.sequenceNumber ?? null,
-		events,
 		eventHandlers: new Set(),
-		sessionEventDispatchScheduled: false,
 		permissionHandlers: new Set(),
 		configOverrides: new Map(),
 		pendingPermissionReplies: new Map(),
@@ -68,7 +59,7 @@ async function flushSessionEventDispatch(): Promise<void> {
 }
 
 describe("AgentOs session event ordering", () => {
-	it("replays buffered events to late subscribers before returning and keeps live delivery ordered", async () => {
+	it("subscribes to live events without replaying buffered history", async () => {
 		const { agent, trackedSession } = createTrackedAgent(["alpha", "beta"]);
 		const seen: string[] = [];
 
@@ -76,34 +67,31 @@ describe("AgentOs session event ordering", () => {
 			seen.push(readText(event));
 		});
 
-		expect(seen).toEqual(["alpha", "beta"]);
+		expect(seen).toEqual([]);
 
 		agent._recordSessionNotification(
 			trackedSession,
-			4,
 			createSessionUpdateNotification("delta"),
 		);
 		agent._recordSessionNotification(
 			trackedSession,
-			3,
 			createSessionUpdateNotification("gamma"),
 		);
 		await flushSessionEventDispatch();
 
-		expect(seen).toEqual(["alpha", "beta", "gamma", "delta"]);
+		expect(seen).toEqual(["delta", "gamma"]);
 
 		unsubscribe();
 		agent._recordSessionNotification(
 			trackedSession,
-			5,
 			createSessionUpdateNotification("epsilon"),
 		);
 		await flushSessionEventDispatch();
 
-		expect(seen).toEqual(["alpha", "beta", "gamma", "delta"]);
+		expect(seen).toEqual(["delta", "gamma"]);
 	});
 
-	it("delivers out-of-order sidecar events to subscribers in sequence order", async () => {
+	it("delivers live sidecar events to subscribers in arrival order", async () => {
 		const { agent, trackedSession } = createTrackedAgent();
 		const seen: string[] = [];
 
@@ -113,20 +101,14 @@ describe("AgentOs session event ordering", () => {
 
 		agent._recordSessionNotification(
 			trackedSession,
-			2,
 			createSessionUpdateNotification("second"),
 		);
 		agent._recordSessionNotification(
 			trackedSession,
-			1,
 			createSessionUpdateNotification("first"),
 		);
 		await flushSessionEventDispatch();
 
-		expect(seen).toEqual(["first", "second"]);
-		expect(agent.getSessionEvents(SESSION_ID).map((event) => event.sequenceNumber)).toEqual([
-			1,
-			2,
-		]);
+		expect(seen).toEqual(["second", "first"]);
 	});
 });

@@ -1,12 +1,12 @@
-import common from "@rivet-dev/agent-os-common";
+import common from "@agent-os-pkgs/common";
 import {
 	createSandboxFs,
 	createSandboxToolkit,
-} from "../../../registry/tool/sandbox/src/index.js";
-import type { MockSandboxAgentHandle } from "../src/test/sandbox-agent.js";
-import { startMockSandboxAgent } from "../src/test/sandbox-agent.js";
+} from "@rivet-dev/agent-os-sandbox";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import { AgentOs } from "../src/index.js";
+import type { MockSandboxAgentHandle } from "../src/test/sandbox-agent.js";
+import { startMockSandboxAgent } from "../src/test/sandbox-agent.js";
 
 const SANDBOX_QUICKSTART_PERMISSIONS = {
 	fs: "allow",
@@ -92,9 +92,9 @@ describe("sandbox quickstart truth test", () => {
 		};
 		expect(createdProcess.status).toBe("running");
 
-		const listProcessesResponse = (await toolkit.tools["list-processes"].execute(
-			{},
-		)) as {
+		const listProcessesResponse = (await toolkit.tools[
+			"list-processes"
+		].execute({})) as {
 			processes: Array<{
 				command: string;
 				args?: string[];

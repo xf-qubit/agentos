@@ -1,7 +1,12 @@
 {
 	"$schema": "https://biomejs.dev/schemas/2.4.10/schema.json",
 	"files": {
-		"includes": ["packages/**/*.ts", "examples/**/*.ts", "!/**/node_modules"],
+		"includes": [
+			"packages/**/*.ts",
+			"examples/**/*.ts",
+			"!packages/core/src/sidecar/generated-protocol.ts",
+			"!/**/node_modules"
+		],
 		"ignoreUnknown": true
 	},
 	"vcs": {

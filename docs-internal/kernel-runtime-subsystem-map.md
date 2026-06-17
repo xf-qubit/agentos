@@ -126,7 +126,7 @@ This is the baseline filesystem layer that everything else builds on.
 Relevant files:
 - `crates/kernel/src/vfs.rs`
 - `crates/kernel/src/root_fs.rs`
-- `packages/core/fixtures/base-filesystem.json`
+- `packages/secure-exec-core/fixtures/base-filesystem.json`
 - `crates/kernel/src/device_layer.rs`
 - `crates/kernel/src/overlay_fs.rs`
 - `crates/kernel/src/mount_table.rs`
@@ -479,21 +479,20 @@ What lives here:
 
 ### ACP agent session layer
 
-This is the sidecar-owned session-management surface for agent adapters that speak ACP over stdio.
+This is the Agent OS extension-owned session-management surface for agent adapters that speak ACP over stdio.
 
 Relevant files:
-- `crates/sidecar/src/acp/client.rs`
-- `crates/sidecar/src/acp/compat.rs`
-- `crates/sidecar/src/acp/json_rpc.rs`
-- `crates/sidecar/src/acp/session.rs`
-- `crates/sidecar/src/service.rs`
+- `crates/agent-os-sidecar/src/acp_extension.rs`
+- `crates/agent-os-protocol/protocol/agent_os_acp_v1.bare`
+- `crates/sidecar/src/extension.rs`
+- `crates/sidecar/src/stdio.rs`
 
 What lives here:
 - JSON-RPC message parsing and serialization.
 - ACP request/response transport management, timeouts, notification fanout, and request dedupe.
 - Compatibility shims for permission requests, cancel behavior, and agent-specific quirks.
-- Session state, event sequencing, terminal capture, config/mode tracking, and compatibility-derived options.
-- The ACP orchestration embedded in `service.rs`, including handshake, stdout prebuffering, permission-request normalization, terminal proxying, and close/kill wiring.
+- Extension session state, live event emission, terminal capture, config/mode tracking, and compatibility-derived options.
+- The ACP orchestration embedded in `acp_extension.rs`, including handshake, stdout prebuffering, permission-request normalization, terminal proxying, and close/kill wiring.
 
 ### First-party mount plugins
 

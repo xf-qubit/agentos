@@ -1,20 +1,24 @@
 //! End-to-end coverage for sidecar-owned system-prompt injection at `create_session`.
 //!
 //! The base prompt is no longer baked into a guest file (`/etc/agentos/instructions.md` is gone);
-//! the sidecar assembles `base + additional + tool docs` and injects it into the launched adapter's
-//! argv (`--append-system-prompt` for `pi`). This test resolves a tiny mock ACP adapter through the
-//! real module-access path, launches a `pi` session, and asserts the adapter actually observed the
+//! the Agent OS client passes create-time additions and generated tool docs to the wrapper sidecar,
+//! which assembles them with the base prompt and injects the result into the launched adapter's argv
+//! (`--append-system-prompt` for `pi`). This test resolves a tiny mock ACP adapter through the real
+//! module-access path, launches a `pi` session, and asserts the adapter actually observed the
 //! injected prompt in `process.argv`.
 
 mod common;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use agent_os_client::config::{
-    AgentOsConfig, FsPermissions, PatternPermissions, PermissionMode, Permissions,
+    AgentOsConfig, AgentOsSidecarConfig, FsPermissions, HostTool, PatternPermissions,
+    PermissionMode, Permissions, ToolKit,
 };
 use agent_os_client::{AgentOs, CreateSessionOptions};
+use serde_json::json;
 use uuid::Uuid;
 
 /// A mock ACP adapter that answers `initialize` / `session/new` and echoes its own `process.argv`
@@ -42,7 +46,7 @@ process.stdin.on("data", (chunk) => {
         };
         break;
       case "session/new":
-        result = { sessionId: "mock-session-1" };
+        result = { sessionId: "__MOCK_SESSION_ID__" };
         break;
       default:
         process.stdout.write(
@@ -86,24 +90,45 @@ fn write_mock_pi_adapter(module_access_cwd: &std::path::Path) {
         r#"{ "name": "@rivet-dev/agent-os-pi", "version": "0.0.0", "bin": "./adapter.mjs" }"#,
     )
     .expect("write mock adapter package.json");
-    std::fs::write(package_dir.join("adapter.mjs"), MOCK_ACP_ADAPTER)
+    let adapter = MOCK_ACP_ADAPTER.replace(
+        "__MOCK_SESSION_ID__",
+        &format!("mock-session-{}", Uuid::new_v4()),
+    );
+    std::fs::write(package_dir.join("adapter.mjs"), adapter)
         .expect("write mock adapter entrypoint");
 }
 
 async fn launch_pi_session_and_read_argv(options: CreateSessionOptions) -> Vec<String> {
-    let module_access_dir =
-        std::env::temp_dir().join(format!("agent-os-client-os-instructions-{}", Uuid::new_v4()));
+    launch_pi_session_with_tools_and_read_argv(options, Vec::new()).await
+}
+
+async fn launch_pi_session_with_tools_and_read_argv(
+    options: CreateSessionOptions,
+    tool_kits: Vec<ToolKit>,
+) -> Vec<String> {
+    let module_access_dir = std::env::temp_dir().join(format!(
+        "agent-os-client-os-instructions-{}",
+        Uuid::new_v4()
+    ));
     write_mock_pi_adapter(&module_access_dir);
 
-    let argv = run_session(&module_access_dir, options).await;
+    let argv = run_session(&module_access_dir, options, tool_kits).await;
 
     std::fs::remove_dir_all(&module_access_dir).ok();
     argv
 }
 
-async fn run_session(module_access_dir: &PathBuf, options: CreateSessionOptions) -> Vec<String> {
+async fn run_session(
+    module_access_dir: &PathBuf,
+    options: CreateSessionOptions,
+    tool_kits: Vec<ToolKit>,
+) -> Vec<String> {
     let os = AgentOs::create(AgentOsConfig {
         module_access_cwd: Some(module_access_dir.to_string_lossy().into_owned()),
+        sidecar: Some(AgentOsSidecarConfig::Shared {
+            pool: Some(format!("os-instructions-{}", Uuid::new_v4())),
+        }),
+        tool_kits,
         permissions: Some(allow_all_permissions()),
         ..Default::default()
     })
@@ -136,8 +161,7 @@ fn injected_prompt<'a>(argv: &'a [String]) -> &'a str {
         .iter()
         .position(|arg| arg == "--append-system-prompt")
         .unwrap_or_else(|| panic!("argv should contain --append-system-prompt, got {argv:?}"));
-    argv
-        .get(idx + 1)
+    argv.get(idx + 1)
         .unwrap_or_else(|| panic!("--append-system-prompt should be followed by a value: {argv:?}"))
         .as_str()
 }
@@ -165,6 +189,48 @@ async fn create_session_injects_assembled_system_prompt() {
     assert!(
         prompt.contains(ADDITIONAL_MARKER),
         "create-time additional instructions are appended: {prompt:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn create_session_injects_host_tool_reference_from_client_config() {
+    if !common::sidecar_available() {
+        panic!(
+            "create_session_injects_host_tool_reference_from_client_config: sidecar binary is not built; build it with `cargo build -p agent-os-sidecar`"
+        );
+    }
+    common::ensure_sidecar_env();
+
+    let argv = launch_pi_session_with_tools_and_read_argv(
+        CreateSessionOptions::default(),
+        vec![ToolKit {
+            name: "weather".to_string(),
+            description: "Weather lookup tools.".to_string(),
+            tools: vec![HostTool {
+                name: "forecast".to_string(),
+                description: "Get a forecast.".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "zipCode": { "type": "string" },
+                    },
+                    "required": ["zipCode"],
+                }),
+                timeout_ms: None,
+                execute: Arc::new(|_input| Box::pin(async { Ok(json!({ "ok": true })) })),
+            }],
+        }],
+    )
+    .await;
+
+    let prompt = injected_prompt(&argv);
+    assert!(
+        prompt.contains("## Available Host Tools"),
+        "client-generated tool reference is injected: {prompt:?}"
+    );
+    assert!(
+        prompt.contains("`agentos-weather forecast --zip-code <string>`"),
+        "tool reference includes CLI command and schema-derived flags: {prompt:?}"
     );
 }
 

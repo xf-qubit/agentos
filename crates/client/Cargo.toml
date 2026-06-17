@@ -7,8 +7,9 @@ repository.workspace = true
 description = "High-level Rust client SDK for the Agent OS native sidecar (1:1 port of the TypeScript AgentOs client)"
 
 [dependencies]
-# Reuse the existing sidecar BARE wire schema + IPC transport. No new wire types are defined here.
-agent-os-sidecar = { workspace = true }
+# Reuse the secure-exec BARE wire schema + IPC transport. No new wire types are defined here.
+secure-exec-client = { workspace = true }
+agent-os-protocol = { workspace = true }
 agent-os-bridge = { workspace = true }
 
 anyhow = "1"

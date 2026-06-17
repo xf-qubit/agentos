@@ -1,9 +1,8 @@
 /**
  * In-memory filesystem for browser environments.
  *
- * Expanded from the original Agent OS in-memory filesystem with POSIX
- * extensions (symlinks, hard links, chmod, chown, utimes, truncate)
- * needed by the kernel VFS interface.
+ * In-memory filesystem with POSIX extensions (symlinks, hard links, chmod,
+ * chown, utimes, truncate) needed by the kernel VFS interface.
  */
 
 import type {

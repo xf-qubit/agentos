@@ -18,11 +18,9 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::{Deserialize, Serialize};
 
-use agent_os_sidecar::protocol::{
-    GuestFilesystemCallRequest, GuestFilesystemOperation, GuestFilesystemResultResponse,
-    GuestFilesystemStat, OwnershipScope, RejectedResponse, RequestPayload, ResponsePayload,
-    RootFilesystemEntry, RootFilesystemEntryEncoding, RootFilesystemEntryKind,
-    SnapshotRootFilesystemRequest,
+use secure_exec_client::wire::{
+    self, GuestFilesystemCallRequest, GuestFilesystemOperation, GuestFilesystemResultResponse,
+    GuestFilesystemStat, RootFilesystemEntry, RootFilesystemEntryEncoding, RootFilesystemEntryKind,
 };
 
 use crate::agent_os::AgentOs;
@@ -371,12 +369,12 @@ impl AgentOs {
     }
 
     /// Build the VM-scoped ownership for guest filesystem RPCs.
-    fn fs_vm_scope(&self) -> OwnershipScope {
-        OwnershipScope::vm(
-            self.connection_id().to_string(),
-            self.wire_session_id().to_string(),
-            self.vm_id().to_string(),
-        )
+    fn fs_vm_scope(&self) -> wire::OwnershipScope {
+        wire::OwnershipScope::VmOwnership(wire::VmOwnership {
+            connection_id: self.connection_id().to_string(),
+            session_id: self.wire_session_id().to_string(),
+            vm_id: self.vm_id().to_string(),
+        })
     }
 
     /// Posix `dirname` over an already-normalized absolute path (mirrors `posixPath.dirname`).
@@ -407,12 +405,15 @@ impl AgentOs {
         let scope = self.fs_vm_scope();
         let response = self
             .transport()
-            .request(scope, RequestPayload::GuestFilesystemCall(request))
+            .request_wire(
+                scope,
+                wire::RequestPayload::GuestFilesystemCallRequest(request),
+            )
             .await
             .context("guest filesystem call failed")?;
         match response {
-            ResponsePayload::GuestFilesystemResult(result) => Ok(result),
-            ResponsePayload::Rejected(RejectedResponse { code, message }) => {
+            wire::ResponsePayload::GuestFilesystemResultResponse(result) => Ok(result),
+            wire::ResponsePayload::RejectedResponse(wire::RejectedResponse { code, message }) => {
                 Err(ClientError::Kernel { code, message }.into())
             }
             other => Err(anyhow::anyhow!(
@@ -844,15 +845,12 @@ impl AgentOs {
         let scope = self.fs_vm_scope();
         let response = self
             .transport()
-            .request(
-                scope,
-                RequestPayload::SnapshotRootFilesystem(SnapshotRootFilesystemRequest {}),
-            )
+            .request_wire(scope, wire::RequestPayload::SnapshotRootFilesystemRequest)
             .await
             .context("snapshot root filesystem failed")?;
         let snapshot = match response {
-            ResponsePayload::RootFilesystemSnapshot(snapshot) => snapshot,
-            ResponsePayload::Rejected(RejectedResponse { code, message }) => {
+            wire::ResponsePayload::RootFilesystemSnapshotResponse(snapshot) => snapshot,
+            wire::ResponsePayload::RejectedResponse(wire::RejectedResponse { code, message }) => {
                 return Err(ClientError::Kernel { code, message }.into());
             }
             other => {

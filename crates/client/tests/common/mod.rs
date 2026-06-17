@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::sync::Once;
 
-use agent_os_client::config::{AgentOsConfig, MountConfig, MountPlugin};
+use agent_os_client::config::{AgentOsConfig, AgentOsSidecarConfig, MountConfig, MountPlugin};
 use agent_os_client::AgentOs;
 
 static INIT: Once = Once::new();
@@ -63,6 +63,24 @@ pub async fn new_vm() -> AgentOs {
     new_vm_with_loopback_ports(Vec::new()).await
 }
 
+pub async fn new_vm_with_sidecar_pool(pool: impl Into<String>) -> AgentOs {
+    ensure_sidecar_env();
+    AgentOs::create(AgentOsConfig {
+        module_access_cwd: Some(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../..")
+                .to_string_lossy()
+                .into_owned(),
+        ),
+        sidecar: Some(AgentOsSidecarConfig::Shared {
+            pool: Some(pool.into()),
+        }),
+        ..Default::default()
+    })
+    .await
+    .expect("create VM against real sidecar")
+}
+
 pub async fn new_vm_with_loopback_ports(loopback_exempt_ports: Vec<u16>) -> AgentOs {
     new_vm_with_config(loopback_exempt_ports, Vec::new()).await
 }
@@ -94,18 +112,22 @@ async fn new_vm_with_config(loopback_exempt_ports: Vec<u16>, mounts: Vec<MountCo
     .expect("create VM against real sidecar")
 }
 
-fn wasm_commands_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../registry/software/coreutils/wasm")
+fn wasm_commands_dir() -> Option<PathBuf> {
+    let registry_dir =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../registry/software/coreutils/wasm");
+    if registry_dir.is_dir() {
+        return Some(registry_dir);
+    }
+    coreutils_wasm_dir()
 }
 
 fn wasm_command_mounts() -> Vec<MountConfig> {
-    let host_path = wasm_commands_dir();
-    if !host_path.exists() {
+    let Some(host_path) = wasm_commands_dir() else {
         return Vec::new();
-    }
+    };
 
     vec![MountConfig::Native {
-        path: "/__agentos/commands/0".to_string(),
+        path: "/__secure_exec/commands/0".to_string(),
         plugin: MountPlugin {
             id: "host_dir".to_string(),
             config: Some(serde_json::json!({
@@ -129,7 +151,7 @@ pub fn coreutils_wasm_dir() -> Option<PathBuf> {
         {
             let wasm = entry
                 .path()
-                .join("node_modules/@rivet-dev/agent-os-coreutils/wasm");
+                .join("node_modules/@secure-exec/coreutils/wasm");
             if wasm.is_dir() {
                 return std::fs::canonicalize(&wasm).ok();
             }

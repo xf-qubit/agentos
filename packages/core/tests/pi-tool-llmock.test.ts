@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import type { Fixture, ToolCall } from "@copilotkit/llmock";
-import common from "@rivet-dev/agent-os-common";
+import common from "@agent-os-pkgs/common";
 import pi from "@rivet-dev/agent-os-pi";
 import { describe, expect, test } from "vitest";
 import { AgentOs } from "../src/agent-os.js";
@@ -112,21 +112,23 @@ describe("pi tool execution (llmock)", () => {
 				})
 			).sessionId;
 
+			const events: { method: string; params?: unknown }[] = [];
+			const unsubscribeEvents = vm.onSessionEvent(sessionId, (event) => {
+				events.push(event);
+			});
 			const { response, text } = await vm.prompt(
 				sessionId,
 				"Write the text 'tool-test-ok' to tool-verify.txt. Do not explain, just do it.",
 			);
+			unsubscribeEvents();
 
 			expect(response.error).toBeUndefined();
 			expect(text).toContain("tool-verify.txt was created successfully.");
-			expect(
-				new TextDecoder().decode(await vm.readFile(workspacePath)),
-			).toBe("tool-test-ok");
+			expect(new TextDecoder().decode(await vm.readFile(workspacePath))).toBe(
+				"tool-test-ok",
+			);
 			expect(mock.getRequests().length).toBeGreaterThanOrEqual(2);
 
-			const events = vm
-				.getSessionEvents(sessionId)
-				.map((event) => event.notification);
 			expect(
 				events.some(
 					(event) =>
@@ -138,7 +140,7 @@ describe("pi tool execution (llmock)", () => {
 				events.some(
 					(event) =>
 						event.method === "session/update" &&
-						JSON.stringify(event.params).includes("\"completed\""),
+						JSON.stringify(event.params).includes('"completed"'),
 				),
 			).toBe(true);
 		} finally {

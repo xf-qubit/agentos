@@ -1,5 +1,5 @@
-import common from "@rivet-dev/agent-os-common";
-import git from "@rivet-dev/agent-os-git";
+import common from "@agent-os-pkgs/common";
+import git from "@agent-os-pkgs/git";
 import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { AgentOs } from "../src/index.js";

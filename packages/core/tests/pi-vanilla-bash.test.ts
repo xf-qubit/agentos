@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import type { Fixture, ToolCall } from "@copilotkit/llmock";
-import common from "@rivet-dev/agent-os-common";
+import common from "@agent-os-pkgs/common";
 import pi from "@rivet-dev/agent-os-pi";
 import { describe, expect, test } from "vitest";
 import { AgentOs } from "../src/agent-os.js";
@@ -90,11 +90,21 @@ async function createVmWorkspace(vm: AgentOs): Promise<string> {
 	return workspaceDir;
 }
 
-function sessionEventText(vm: AgentOs, sessionId: string): string {
-	return vm
-		.getSessionEvents(sessionId)
-		.map((event) => JSON.stringify(event.notification.params))
-		.join("\n");
+function captureSessionEventText(
+	vm: AgentOs,
+	sessionId: string,
+): {
+	text: () => string;
+	unsubscribe: () => void;
+} {
+	const events: string[] = [];
+	const unsubscribe = vm.onSessionEvent(sessionId, (event) => {
+		events.push(JSON.stringify(event.params));
+	});
+	return {
+		text: () => events.join("\n"),
+		unsubscribe,
+	};
 }
 
 /**
@@ -139,9 +149,11 @@ describe("vanilla Pi bash tool inside the VM", () => {
 				})
 			).sessionId;
 
+			const eventText = captureSessionEventText(vm, sessionId);
 			const { response } = await vm.prompt(sessionId, "Run pwd.");
+			eventText.unsubscribe();
 			expect(response.error).toBeUndefined();
-			expect(sessionEventText(vm, sessionId)).toContain(workspaceDir);
+			expect(eventText.text()).toContain(workspaceDir);
 		} finally {
 			if (sessionId) {
 				vm.closeSession(sessionId);
@@ -175,12 +187,14 @@ describe("vanilla Pi bash tool inside the VM", () => {
 				})
 			).sessionId;
 
+			const eventText = captureSessionEventText(vm, sessionId);
 			const { response } = await vm.prompt(
 				sessionId,
 				"Echo the AGENTOS_TEST_FLAG variable.",
 			);
+			eventText.unsubscribe();
 			expect(response.error).toBeUndefined();
-			expect(sessionEventText(vm, sessionId)).toContain("vanilla");
+			expect(eventText.text()).toContain("vanilla");
 		} finally {
 			if (sessionId) {
 				vm.closeSession(sessionId);
@@ -216,12 +230,14 @@ describe("vanilla Pi bash tool inside the VM", () => {
 				})
 			).sessionId;
 
+			const eventText = captureSessionEventText(vm, sessionId);
 			const { response } = await vm.prompt(
 				sessionId,
 				"Run a command that writes to stdout and stderr and exits nonzero.",
 			);
+			eventText.unsubscribe();
 			expect(response.error).toBeUndefined();
-			const events = sessionEventText(vm, sessionId);
+			const events = eventText.text();
 			expect(events).toContain("out-line");
 			expect(events).toContain("err-line");
 			expect(events).toContain("3");
@@ -267,9 +283,7 @@ describe("vanilla Pi bash tool inside the VM", () => {
 			);
 			expect(response.error).toBeUndefined();
 			expect(
-				new TextDecoder().decode(
-					await vm.readFile(`${workspaceDir}/out.txt`),
-				),
+				new TextDecoder().decode(await vm.readFile(`${workspaceDir}/out.txt`)),
 			).toBe("ok");
 		} finally {
 			if (sessionId) {
@@ -308,17 +322,17 @@ describe("vanilla Pi bash tool inside the VM", () => {
 				})
 			).sessionId;
 
+			const eventText = captureSessionEventText(vm, sessionId);
 			const { response } = await vm.prompt(
 				sessionId,
 				"Run sleep 30 with a 1 second timeout.",
 			);
+			eventText.unsubscribe();
 			expect(response.error).toBeUndefined();
 			// The kill must actually fire: completing in seconds (not ~30s) proves
 			// the timeout killed the sleep instead of waiting for it to finish.
 			expect(Date.now() - startedAt).toBeLessThan(20_000);
-			expect(sessionEventText(vm, sessionId).toLowerCase()).toContain(
-				"timed out",
-			);
+			expect(eventText.text().toLowerCase()).toContain("timed out");
 		} finally {
 			if (sessionId) {
 				vm.closeSession(sessionId);

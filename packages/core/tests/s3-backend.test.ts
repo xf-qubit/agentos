@@ -1,4 +1,4 @@
-import { createS3Backend } from "@rivet-dev/agent-os-s3";
+import { createS3Backend } from "@secure-exec/s3";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import { AgentOs } from "../src/index.js";
 import type {

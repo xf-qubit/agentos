@@ -6,7 +6,8 @@
 	"scripts": {
 		"ci": "tsx src/ci/bin.ts",
 		"release": "tsx src/local/cut-release.ts",
-		"check-types": "tsc --noEmit"
+		"check-types": "tsc --noEmit",
+		"test": "node --test --import tsx src/**/*.test.ts"
 	},
 	"dependencies": {
 		"commander": "^12.1.0",

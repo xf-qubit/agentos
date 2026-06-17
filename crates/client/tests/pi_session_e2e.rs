@@ -186,4 +186,5 @@ async fn pi_session_create_prompt_close() {
     );
 
     os.close_session(&session.session_id).ok();
+    os.shutdown().await.expect("shutdown");
 }

@@ -1,4 +1,4 @@
-import common from "@rivet-dev/agent-os-common";
+import common from "@agent-os-pkgs/common";
 import { afterEach, describe, expect, test } from "vitest";
 import { z } from "zod";
 import { AgentOs, hostTool, toolKit } from "../src/index.js";
@@ -66,6 +66,26 @@ describe("toolkit permissions", () => {
 				toolKits: [mathToolKit, duplicateMathToolKit],
 			}),
 		).rejects.toThrow(/conflict: toolkit already registered: math/);
+	});
+
+	test("allows toolkit invocation with default permissions", async () => {
+		vm = await AgentOs.create({
+			software: [common],
+			toolKits: [mathToolKit],
+		});
+
+		const result = await runCommand(vm, "agentos-math", [
+			"add",
+			"--a",
+			"2",
+			"--b",
+			"3",
+		]);
+		expect(result.exitCode).toBe(0);
+		expect(JSON.parse(result.stdout)).toEqual({
+			ok: true,
+			result: { sum: 5 },
+		});
 	});
 
 	test("denies toolkit invocation by default until tool permissions are granted", async () => {

@@ -1,4 +1,4 @@
-import common from "@rivet-dev/agent-os-common";
+import common from "@agent-os-pkgs/common";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { AgentOs } from "../src/agent-os.js";
 import { hasRegistryCommands } from "./helpers/registry-commands.js";

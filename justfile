@@ -6,6 +6,22 @@ release *args:
 preview-publish REF:
 	gh workflow run .github/workflows/publish.yaml --ref "{{ REF }}"
 
+# Point the workspace at PUBLISHED secure-exec versions (CI/release default).
+secure-exec-pinned:
+	node scripts/secure-exec-dep.mjs pinned
+
+# Point the workspace at the sibling ../secure-exec checkout for local hacking.
+secure-exec-local:
+	node scripts/secure-exec-dep.mjs local
+
+# Bump the pinned secure-exec version across the whole workspace (npm + crates).
+secure-exec-set-version VERSION:
+	node scripts/secure-exec-dep.mjs set-version "{{ VERSION }}"
+
+# Show the current secure-exec dependency mode + pinned versions.
+secure-exec-status:
+	node scripts/secure-exec-dep.mjs status
+
 dev-shell *args:
 	pnpm --filter @rivet-dev/agent-os-dev-shell dev-shell -- "$@"
 

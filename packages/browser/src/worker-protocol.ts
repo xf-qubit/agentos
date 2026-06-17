@@ -26,6 +26,16 @@ export type BrowserWorkerExecOptions = {
 	timingMitigation?: TimingMitigation;
 };
 
+export type BrowserWorkerExtensionRequestPayload = {
+	namespace: string;
+	payload: Uint8Array;
+};
+
+export type BrowserWorkerExtensionResponse = {
+	namespace: string;
+	payload: Uint8Array;
+};
+
 export type BrowserWorkerInitPayload = {
 	processConfig?: ProcessConfig;
 	osConfig?: OSConfig;
@@ -70,6 +80,11 @@ export type BrowserWorkerRequestMessage =
 				captureStdio?: boolean;
 			};
 	  }
+	| (BrowserWorkerControlMessage & {
+			id: number;
+			type: "extension";
+			payload: BrowserWorkerExtensionRequestPayload;
+	  })
 	| (BrowserWorkerControlMessage & { id: number; type: "dispose" });
 
 export type BrowserWorkerResponseMessage =
@@ -77,7 +92,7 @@ export type BrowserWorkerResponseMessage =
 			type: "response";
 			id: number;
 			ok: true;
-			result: ExecResult | RunResult | true;
+			result: ExecResult | RunResult | BrowserWorkerExtensionResponse | true;
 	  })
 	| {
 			controlToken: string;

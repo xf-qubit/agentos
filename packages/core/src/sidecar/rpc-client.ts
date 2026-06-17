@@ -593,7 +593,7 @@ export class NativeSidecarKernelProxy {
 			cwd: options?.cwd ?? this.cwd,
 			env: {
 				...(options?.env ?? {}),
-				...(options?.streamStdin ? { AGENT_OS_KEEP_STDIN_OPEN: "1" } : {}),
+				...(options?.streamStdin ? { SECURE_EXEC_KEEP_STDIN_OPEN: "1" } : {}),
 			},
 			startTime: Date.now(),
 			exitTime: null,
@@ -2227,7 +2227,7 @@ export type {
 	RootFilesystemEntry,
 	SidecarEventSelector,
 	SidecarPermissionsPolicy,
-	SidecarRegisteredToolDefinition,
+	SidecarRegisteredHostCallbackDefinition,
 	SidecarRequestFrame,
 	SidecarResponsePayload,
 	SidecarSessionState,

@@ -10,7 +10,7 @@
 //! field may be populated (including `acp_timeout` and codex `-32601` fallbacks). Do not convert
 //! those into `Err`.
 
-use agent_os_sidecar::protocol::ProtocolCodecError;
+use secure_exec_client::{ProtocolCodecError, TransportError};
 
 /// Typed error taxonomy for the client SDK.
 #[derive(thiserror::Error, Debug)]
@@ -72,6 +72,15 @@ pub enum ClientError {
     /// A generic sidecar rejection or I/O failure with context.
     #[error("sidecar error: {0}")]
     Sidecar(String),
+}
+
+impl From<TransportError> for ClientError {
+    fn from(error: TransportError) -> Self {
+        match error {
+            TransportError::Protocol(error) => ClientError::Transport(error),
+            TransportError::Sidecar(message) => ClientError::Sidecar(message),
+        }
+    }
 }
 
 impl ClientError {

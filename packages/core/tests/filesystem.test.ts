@@ -135,7 +135,7 @@ describe("filesystem operations", () => {
 			}
 			await stopLlmock(mock);
 		}
-	});
+	}, 120_000);
 
 	test("mkdir and readdir", async () => {
 		await vm.mkdir("/tmp/testdir");

@@ -6,8 +6,7 @@
  *
  * Gated: WasmVM binaries must be built.
  *
- * Uses the repo-owned TerminalHarness exported through the Agent OS core
- * test runtime surface.
+ * Uses the registry-owned TerminalHarness exported through shared helpers.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';

@@ -1,22 +1,55 @@
 #!/usr/bin/env node
 
-import codex from "@rivet-dev/agent-os-codex";
-// Software packages — uses npm-published versions which include pre-built
-// WASM binaries. Workspace copies have empty wasm/ dirs since the native
-// build (Rust nightly + wasi-sdk) is not run locally.
-// curl, wget, sqlite3 are excluded (not yet published, need patched wasi-libc).
-import common from "@rivet-dev/agent-os-common";
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import codex from "@agent-os-pkgs/codex";
+import common from "@agent-os-pkgs/common";
 import { AgentOs } from "@rivet-dev/agent-os-core";
-import fd from "@rivet-dev/agent-os-fd";
-import file from "@rivet-dev/agent-os-file";
-import jq from "@rivet-dev/agent-os-jq";
-import ripgrep from "@rivet-dev/agent-os-ripgrep";
-import tree from "@rivet-dev/agent-os-tree";
-import unzip from "@rivet-dev/agent-os-unzip";
-import yq from "@rivet-dev/agent-os-yq";
-import zip from "@rivet-dev/agent-os-zip";
+import type { SoftwareInput } from "@rivet-dev/agent-os-core";
+import fd from "@agent-os-pkgs/fd";
+import file from "@agent-os-pkgs/file";
+import jq from "@agent-os-pkgs/jq";
+import ripgrep from "@agent-os-pkgs/ripgrep";
+import tree from "@agent-os-pkgs/tree";
+import unzip from "@agent-os-pkgs/unzip";
+import yq from "@agent-os-pkgs/yq";
+import zip from "@agent-os-pkgs/zip";
 
-const software = [common, jq, ripgrep, fd, tree, file, zip, unzip, yq, codex];
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const fallbackCommandDir = resolve(
+	__dirname,
+	"../../..",
+	"registry/native/target/wasm32-wasip1/release/commands",
+);
+
+// Published packages ship package-local wasm/ dirs. Workspace packages use the
+// native build output when those package-local dirs have not been materialized.
+function withLocalCommandFallback(software: SoftwareInput): SoftwareInput {
+	if (Array.isArray(software)) {
+		return software.map(withLocalCommandFallback) as SoftwareInput;
+	}
+
+	if (
+		"commandDir" in software &&
+		typeof software.commandDir === "string" &&
+		!existsSync(software.commandDir) &&
+		existsSync(fallbackCommandDir)
+	) {
+		return {
+			...software,
+			get commandDir() {
+				return fallbackCommandDir;
+			},
+		};
+	}
+
+	return software;
+}
+
+const software = [common, jq, ripgrep, fd, tree, file, zip, unzip, yq, codex].map(
+	withLocalCommandFallback,
+);
 
 function printUsage(): void {
 	console.error(

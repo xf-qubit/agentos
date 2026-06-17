@@ -30,10 +30,14 @@ function ensureSidecarBinaryReady(): void {
 	}
 
 	if (!existsSync(SIDECAR_BINARY)) {
-		execFileSync(resolveCargoBinary(), ["build", "-q", "-p", "agent-os-sidecar"], {
-			cwd: REPO_ROOT,
-			stdio: "pipe",
-		});
+		execFileSync(
+			resolveCargoBinary(),
+			["build", "-q", "-p", "agent-os-sidecar"],
+			{
+				cwd: REPO_ROOT,
+				stdio: "pipe",
+			},
+		);
 	}
 }
 
@@ -81,7 +85,7 @@ describe("native sidecar process client permissions", () => {
 			[
 				"import { writeFileSync } from 'node:fs';",
 				"const capturePath = process.argv[2];",
-				"const schema = { name: 'agent-os-sidecar', version: 1 };",
+				"const schema = { name: 'secure-exec-sidecar', version: 7 };",
 				"let stdinBuffer = Buffer.alloc(0);",
 				"const captures = [];",
 				"const writeFrame = (frame) => {",

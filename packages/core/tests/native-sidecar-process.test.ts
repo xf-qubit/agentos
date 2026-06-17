@@ -71,10 +71,14 @@ function ensureSidecarBinaryReady(): void {
 	}
 
 	if (!existsSync(SIDECAR_BINARY)) {
-		execFileSync(resolveCargoBinary(), ["build", "-q", "-p", "agent-os-sidecar"], {
-			cwd: REPO_ROOT,
-			stdio: "pipe",
-		});
+		execFileSync(
+			resolveCargoBinary(),
+			["build", "-q", "-p", "agent-os-sidecar"],
+			{
+				cwd: REPO_ROOT,
+				stdio: "pipe",
+			},
+		);
 	}
 }
 const BARE_FIXTURE_PROTOCOL_HELPERS = `
@@ -113,16 +117,16 @@ const encodeSchema = (schema) =>
 const encodeOwnership = (ownership) => {
 	switch (ownership.scope) {
 		case "connection":
-			return Buffer.concat([writeVarUint(1), encodeString(ownership.connection_id)]);
+			return Buffer.concat([writeVarUint(0), encodeString(ownership.connection_id)]);
 		case "session":
 			return Buffer.concat([
-				writeVarUint(2),
+				writeVarUint(1),
 				encodeString(ownership.connection_id),
 				encodeString(ownership.session_id),
 			]);
 		case "vm":
 			return Buffer.concat([
-				writeVarUint(3),
+				writeVarUint(2),
 				encodeString(ownership.connection_id),
 				encodeString(ownership.session_id),
 				encodeString(ownership.vm_id),
@@ -136,7 +140,7 @@ const encodeSidecarRequestPayload = (payload) => {
 		throw new Error("unsupported sidecar request payload");
 	}
 	return Buffer.concat([
-		writeVarUint(4),
+		writeVarUint(1),
 		encodeString(payload.call_id),
 		encodeString(payload.mount_id),
 		encodeString(payload.operation),
@@ -148,7 +152,7 @@ const encodeProtocolFrame = (frame) => {
 		throw new Error("unsupported frame type");
 	}
 	return Buffer.concat([
-		writeVarUint(4),
+		writeVarUint(3),
 		encodeSchema(frame.schema),
 		encodeI64(frame.request_id),
 		encodeOwnership(frame.ownership),
@@ -197,15 +201,15 @@ const decodeSchema = (state) => ({
 });
 const decodeOwnership = (state) => {
 	switch (readVarUint(state)) {
-		case 1:
+		case 0:
 			return { scope: "connection", connection_id: readString(state) };
-		case 2:
+		case 1:
 			return {
 				scope: "session",
 				connection_id: readString(state),
 				session_id: readString(state),
 			};
-		case 3:
+		case 2:
 			return {
 				scope: "vm",
 				connection_id: readString(state),
@@ -218,32 +222,27 @@ const decodeOwnership = (state) => {
 };
 const decodeSidecarResponsePayload = (state) => {
 	switch (readVarUint(state)) {
-		case 1:
+		case 0:
 			return {
-				type: "tool_invocation_result",
+				type: "host_callback_result",
 				invocation_id: readString(state),
 				result: readOptional(state, (inner) => JSON.parse(readString(inner))),
 				error: readOptional(state, readString),
 			};
-		case 2:
-			return {
-				type: "permission_request_result",
-				permission_id: readString(state),
-				reply: readOptional(state, readString),
-				error: readOptional(state, readString),
-			};
-		case 3:
-			return {
-				type: "acp_request_result",
-				response: readOptional(state, (inner) => JSON.parse(readString(inner))),
-				error: readOptional(state, readString),
-			};
-		case 4:
+		case 1:
 			return {
 				type: "js_bridge_result",
 				call_id: readString(state),
 				result: readOptional(state, (inner) => JSON.parse(readString(inner))),
 				error: readOptional(state, readString),
+			};
+		case 2:
+			return {
+				type: "ext_result",
+				envelope: {
+					namespace: readString(state),
+					payload: readData(state),
+				},
 			};
 		default:
 			throw new Error("unsupported sidecar response payload");
@@ -252,7 +251,7 @@ const decodeSidecarResponsePayload = (state) => {
 const decodeProtocolFrame = (payload) => {
 	const state = { buffer: payload, offset: 0 };
 	const tag = readVarUint(state);
-	if (tag !== 5) {
+	if (tag !== 4) {
 		throw new Error("expected sidecar_response frame");
 	}
 	const frame = {
@@ -382,7 +381,7 @@ describe("native sidecar process client", () => {
 			[
 				"import { writeFileSync } from 'node:fs';",
 				"const capturePath = process.argv[2];",
-				"const schema = { name: 'agent-os-sidecar', version: 1 };",
+				"const schema = { name: 'secure-exec-sidecar', version: 7 };",
 				"let stdinBuffer = Buffer.alloc(0);",
 				BARE_FIXTURE_PROTOCOL_HELPERS,
 				"const drain = () => {",
@@ -504,8 +503,10 @@ describe("native sidecar process client", () => {
 			frameTimeoutMs: 5_000,
 		});
 		const childPid = (
-			client as unknown as { child: { pid?: number } }
-		).child?.pid;
+			client as unknown as {
+				protocolClient: { child: { pid?: number } };
+			}
+		).protocolClient.child?.pid;
 		expect(typeof childPid).toBe("number");
 
 		const startedAt = Date.now();
@@ -513,9 +514,18 @@ describe("native sidecar process client", () => {
 		const elapsedMs = Date.now() - startedAt;
 		expect(elapsedMs).toBeLessThan(15_000);
 		expect(
-			(client as unknown as { child: { exitCode: number | null; signalCode: string | null } })
-				.child.exitCode === null
-				? (client as unknown as { child: { signalCode: string | null } }).child.signalCode
+			(
+				client as unknown as {
+					protocolClient: {
+						child: { exitCode: number | null; signalCode: string | null };
+					};
+				}
+			).protocolClient.child.exitCode === null
+				? (
+						client as unknown as {
+							protocolClient: { child: { signalCode: string | null } };
+						}
+					).protocolClient.child.signalCode
 				: "exited",
 		).toBeTruthy();
 
@@ -539,7 +549,7 @@ describe("native sidecar process client", () => {
 		writeFileSync(
 			driverPath,
 			[
-				"const schema = { name: 'agent-os-sidecar', version: 1 };",
+				"const schema = { name: 'secure-exec-sidecar', version: 7 };",
 				"const writeFrame = (frame) => {",
 				"  const payload = Buffer.from(JSON.stringify(frame), 'utf8');",
 				"  const prefix = Buffer.allocUnsafe(4);",
@@ -580,8 +590,13 @@ describe("native sidecar process client", () => {
 		try {
 			const overflow = await waitFor(
 				() =>
-					(client as unknown as { stdoutClosedError: Error | null })
-						.stdoutClosedError,
+					(
+						client as unknown as {
+							protocolClient: {
+								protocolClient: { closedError: Error | null };
+							};
+						}
+					).protocolClient.protocolClient.closedError,
 				{
 					timeoutMs: 10_000,
 					isReady: (value): value is SidecarEventBufferOverflow =>
@@ -591,10 +606,14 @@ describe("native sidecar process client", () => {
 			expect(overflow.capacity).toBe(128);
 			expect(overflow.eventType).toBe("structured");
 
-			const bufferedEvents = (
-				client as unknown as { bufferedEvents: Map<number, unknown> }
-			).bufferedEvents;
-			expect(bufferedEvents.size).toBeLessThanOrEqual(128);
+			const eventBuffer = (
+				client as unknown as {
+					protocolClient: {
+						protocolClient: { eventBuffer: { size: number } };
+					};
+				}
+			).protocolClient.protocolClient.eventBuffer;
+			expect(eventBuffer.size).toBeLessThanOrEqual(128);
 
 			await expect(
 				client.waitForEvent(
@@ -619,7 +638,7 @@ describe("native sidecar process client", () => {
 		writeFileSync(
 			driverPath,
 			[
-				"const schema = { name: 'agent-os-sidecar', version: 1 };",
+				"const schema = { name: 'secure-exec-sidecar', version: 7 };",
 				"let stdinBuffer = Buffer.alloc(0);",
 				"const writeFrame = (frame) => {",
 				"  const payload = Buffer.from(JSON.stringify(frame), 'utf8');",
@@ -713,9 +732,11 @@ describe("native sidecar process client", () => {
 				() =>
 					(
 						client as unknown as {
-							child: { exitCode: number | null };
+							protocolClient: {
+								child: { exitCode: number | null };
+							};
 						}
-					).child.exitCode,
+					).protocolClient.child.exitCode,
 				{
 					timeoutMs: 1_000,
 					isReady: (value) => value === 17,
@@ -729,9 +750,7 @@ describe("native sidecar process client", () => {
 			await expect(secondRequest).rejects.toMatchObject({
 				exitCode: 17,
 			});
-			await expect(
-				secondRequest,
-			).rejects.toBeInstanceOf(SidecarProcessExited);
+			await expect(secondRequest).rejects.toBeInstanceOf(SidecarProcessExited);
 			expect(Date.now() - secondStartedAt).toBeLessThan(20);
 		} finally {
 			await client.dispose().catch(() => {});
@@ -786,8 +805,12 @@ describe("native sidecar process client", () => {
 	}, 60_000);
 
 	test("NativeKernel exposes symlinked node_modules passthrough directories", async () => {
-		const projectRoot = mkdtempSync(join(tmpdir(), "agent-os-node-modules-root-"));
-		const dependencyRoot = mkdtempSync(join(tmpdir(), "agent-os-node-modules-store-"));
+		const projectRoot = mkdtempSync(
+			join(tmpdir(), "agent-os-node-modules-root-"),
+		);
+		const dependencyRoot = mkdtempSync(
+			join(tmpdir(), "agent-os-node-modules-store-"),
+		);
 		cleanupPaths.push(projectRoot, dependencyRoot);
 		const packageJsonPath = join(dependencyRoot, "package.json");
 		writeFileSync(packageJsonPath, '{"name":"dependency"}\n');
@@ -853,14 +876,18 @@ describe("native sidecar process client", () => {
 
 			let wasmReadStdout = "";
 			let wasmReadStderr = "";
-			const wasmReadChild = kernel.spawn("cat", ["/node_modules/package.json"], {
-				onStdout: (chunk) => {
-					wasmReadStdout += Buffer.from(chunk).toString("utf8");
+			const wasmReadChild = kernel.spawn(
+				"cat",
+				["/node_modules/package.json"],
+				{
+					onStdout: (chunk) => {
+						wasmReadStdout += Buffer.from(chunk).toString("utf8");
+					},
+					onStderr: (chunk) => {
+						wasmReadStderr += Buffer.from(chunk).toString("utf8");
+					},
 				},
-				onStderr: (chunk) => {
-					wasmReadStderr += Buffer.from(chunk).toString("utf8");
-				},
-			});
+			);
 			expect(await wasmReadChild.wait()).toBe(0);
 			expect(wasmReadStderr).toBe("");
 			expect(wasmReadStdout).toBe('{"name":"dependency"}\n');
@@ -878,9 +905,7 @@ describe("native sidecar process client", () => {
 			const wasmExitCode = await wasmChild.wait();
 			expect(wasmExitCode).not.toBe(0);
 			expect(wasmStderr).toMatch(/read-?only|EROFS/i);
-			expect(existsSync(join(dependencyRoot, "mutated-wasm.txt"))).toBe(
-				false,
-			);
+			expect(existsSync(join(dependencyRoot, "mutated-wasm.txt"))).toBe(false);
 			expect(readFileSync(packageJsonPath, "utf8")).toBe(
 				'{"name":"dependency"}\n',
 			);
@@ -899,9 +924,7 @@ describe("native sidecar process client", () => {
 			const wasmRelativeExitCode = await wasmRelativeChild.wait();
 			expect(wasmRelativeExitCode).not.toBe(0);
 			expect(wasmRelativeStderr).toMatch(/read-?only|EROFS/i);
-			expect(existsSync(join(dependencyRoot, "relative-wasm.txt"))).toBe(
-				false,
-			);
+			expect(existsSync(join(dependencyRoot, "relative-wasm.txt"))).toBe(false);
 
 			let wasmLinkStderr = "";
 			const wasmLinkChild = kernel.spawn(

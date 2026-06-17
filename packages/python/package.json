@@ -32,7 +32,7 @@
     "test": "pnpm build && vitest run --fileParallelism=false"
   },
   "dependencies": {
-    "@secure-exec/core": "^0.2.1",
+    "@secure-exec/core": "catalog:",
     "pyodide": "^0.28.3"
   },
   "peerDependencies": {
@@ -44,7 +44,7 @@
     }
   },
   "devDependencies": {
-    "@secure-exec/nodejs": "^0.2.1",
+    "@secure-exec/nodejs": "catalog:",
     "@types/node": "^22.10.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

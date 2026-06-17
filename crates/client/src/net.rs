@@ -6,7 +6,6 @@
 //! Fully buffered both directions. Wire path is the existing `VmFetch` request/response.
 
 use std::collections::BTreeMap;
-use std::sync::atomic::Ordering;
 
 use anyhow::{Context, Result};
 use base64::Engine as _;
@@ -14,9 +13,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use bytes::Bytes;
 use serde::Deserialize;
 
-use agent_os_sidecar::protocol::{
-    OwnershipScope, RejectedResponse, RequestPayload, ResponsePayload, VmFetchRequest,
-};
+use secure_exec_client::wire;
 
 use crate::agent_os::AgentOs;
 use crate::error::ClientError;
@@ -24,7 +21,7 @@ use crate::error::ClientError;
 /// Maximum fully buffered fetch component size. `VmFetch` is a single request/response frame, so
 /// keeping this at the default frame size prevents fetch-specific buffers from growing just because
 /// a sidecar was configured with a larger transport frame limit for another API.
-const VM_FETCH_BUFFER_LIMIT_BYTES: usize = agent_os_sidecar::protocol::DEFAULT_MAX_FRAME_BYTES;
+const VM_FETCH_BUFFER_LIMIT_BYTES: usize = secure_exec_client::wire::DEFAULT_MAX_FRAME_BYTES;
 
 /// The shape of the JSON string returned in [`VmFetchResponse::response_json`], mirroring the TS
 /// `{ status, statusText?, headers?: [k,v][], body?: base64 }` payload.
@@ -118,9 +115,9 @@ impl AgentOs {
 
         let response = self
             .transport()
-            .request_bounded(
+            .request_wire_bounded(
                 self.vm_fetch_ownership(),
-                RequestPayload::VmFetch(VmFetchRequest {
+                wire::RequestPayload::VmFetchRequest(wire::VmFetchRequest {
                     port,
                     method,
                     path,
@@ -132,8 +129,8 @@ impl AgentOs {
             .await?;
 
         let response_json = match response {
-            ResponsePayload::VmFetchResult(result) => result.response_json,
-            ResponsePayload::Rejected(RejectedResponse { code, message }) => {
+            wire::ResponsePayload::VmFetchResponse(result) => result.response_json,
+            wire::ResponsePayload::RejectedResponse(wire::RejectedResponse { code, message }) => {
                 return Err(ClientError::Kernel { code, message }.into());
             }
             other => {
@@ -189,14 +186,17 @@ impl AgentOs {
     }
 
     /// The VM-scoped ownership used for the `VmFetch` wire request.
-    fn vm_fetch_ownership(&self) -> OwnershipScope {
-        OwnershipScope::vm(self.connection_id(), self.wire_session_id(), self.vm_id())
+    fn vm_fetch_ownership(&self) -> wire::OwnershipScope {
+        wire::OwnershipScope::VmOwnership(wire::VmOwnership {
+            connection_id: self.connection_id().to_string(),
+            session_id: self.wire_session_id().to_string(),
+            vm_id: self.vm_id().to_string(),
+        })
     }
 
     fn fetch_buffer_limit(&self) -> usize {
         self.transport()
-            .max_frame_bytes
-            .load(Ordering::Relaxed)
+            .max_frame_bytes()
             .min(VM_FETCH_BUFFER_LIMIT_BYTES)
     }
 }
@@ -314,7 +314,7 @@ mod tests {
     fn fetch_buffer_limit_is_fixed_to_default_frame_size() {
         assert_eq!(
             VM_FETCH_BUFFER_LIMIT_BYTES,
-            agent_os_sidecar::protocol::DEFAULT_MAX_FRAME_BYTES
+            secure_exec_client::wire::DEFAULT_MAX_FRAME_BYTES
         );
     }
 }

@@ -4,6 +4,84 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+catalogs:
+  default:
+    '@agent-os-pkgs/codex':
+      specifier: 0.0.0-split-runtime-preview.5d46b14
+      version: 0.0.0-split-runtime-preview.5d46b14
+    '@agent-os-pkgs/common':
+      specifier: 0.0.0-split-runtime-preview.5d46b14
+      version: 0.0.0-split-runtime-preview.5d46b14
+    '@agent-os-pkgs/coreutils':
+      specifier: 0.0.0-split-runtime-preview.5d46b14
+      version: 0.0.0-split-runtime-preview.5d46b14
+    '@agent-os-pkgs/curl':
+      specifier: 0.0.0-split-runtime-preview.5d46b14
+      version: 0.0.0-split-runtime-preview.5d46b14
+    '@agent-os-pkgs/diffutils':
+      specifier: 0.0.0-split-runtime-preview.5d46b14
+      version: 0.0.0-split-runtime-preview.5d46b14
+    '@agent-os-pkgs/fd':
+      specifier: 0.0.0-split-runtime-preview.5d46b14
+      version: 0.0.0-split-runtime-preview.5d46b14
+    '@agent-os-pkgs/file':
+      specifier: 0.0.0-split-runtime-preview.5d46b14
+      version: 0.0.0-split-runtime-preview.5d46b14
+    '@agent-os-pkgs/findutils':
+      specifier: 0.0.0-split-runtime-preview.5d46b14
+      version: 0.0.0-split-runtime-preview.5d46b14
+    '@agent-os-pkgs/gawk':
+      specifier: 0.0.0-split-runtime-preview.5d46b14
+      version: 0.0.0-split-runtime-preview.5d46b14
+    '@agent-os-pkgs/git':
+      specifier: 0.0.0-split-runtime-preview.5d46b14
+      version: 0.0.0-split-runtime-preview.5d46b14
+    '@agent-os-pkgs/grep':
+      specifier: 0.0.0-split-runtime-preview.5d46b14
+      version: 0.0.0-split-runtime-preview.5d46b14
+    '@agent-os-pkgs/gzip':
+      specifier: 0.0.0-split-runtime-preview.5d46b14
+      version: 0.0.0-split-runtime-preview.5d46b14
+    '@agent-os-pkgs/jq':
+      specifier: 0.0.0-split-runtime-preview.5d46b14
+      version: 0.0.0-split-runtime-preview.5d46b14
+    '@agent-os-pkgs/ripgrep':
+      specifier: 0.0.0-split-runtime-preview.5d46b14
+      version: 0.0.0-split-runtime-preview.5d46b14
+    '@agent-os-pkgs/sed':
+      specifier: 0.0.0-split-runtime-preview.5d46b14
+      version: 0.0.0-split-runtime-preview.5d46b14
+    '@agent-os-pkgs/tar':
+      specifier: 0.0.0-split-runtime-preview.5d46b14
+      version: 0.0.0-split-runtime-preview.5d46b14
+    '@agent-os-pkgs/tree':
+      specifier: 0.0.0-split-runtime-preview.5d46b14
+      version: 0.0.0-split-runtime-preview.5d46b14
+    '@agent-os-pkgs/unzip':
+      specifier: 0.0.0-split-runtime-preview.5d46b14
+      version: 0.0.0-split-runtime-preview.5d46b14
+    '@agent-os-pkgs/yq':
+      specifier: 0.0.0-split-runtime-preview.5d46b14
+      version: 0.0.0-split-runtime-preview.5d46b14
+    '@agent-os-pkgs/zip':
+      specifier: 0.0.0-split-runtime-preview.5d46b14
+      version: 0.0.0-split-runtime-preview.5d46b14
+    '@secure-exec/core':
+      specifier: 0.0.0-split-runtime-preview.5d46b14
+      version: 0.0.0-split-runtime-preview.5d46b14
+    '@secure-exec/google-drive':
+      specifier: 0.0.0-split-runtime-preview.5d46b14
+      version: 0.0.0-split-runtime-preview.5d46b14
+    '@secure-exec/nodejs':
+      specifier: 0.2.1
+      version: 0.2.1
+    '@secure-exec/s3':
+      specifier: 0.0.0-split-runtime-preview.5d46b14
+      version: 0.0.0-split-runtime-preview.5d46b14
+    '@secure-exec/sandbox':
+      specifier: 0.0.0-split-runtime-preview.5d46b14
+      version: 0.0.0-split-runtime-preview.5d46b14
+
 overrides:
   '@rivet-dev/agent-os-core': workspace:*
 
@@ -11,6 +89,9 @@ importers:
 
   .:
     devDependencies:
+      '@agent-os-pkgs/common':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
       '@biomejs/biome':
         specifier: ^2.3
         version: 2.4.10
@@ -23,15 +104,15 @@ importers:
       '@rivet-dev/agent-os-codex-agent':
         specifier: workspace:*
         version: link:registry/agent/codex
-      '@rivet-dev/agent-os-common':
-        specifier: workspace:*
-        version: link:registry/software/common
       '@rivet-dev/agent-os-core':
         specifier: workspace:*
         version: link:packages/core
       '@rivet-dev/agent-os-pi':
         specifier: workspace:*
         version: link:registry/agent/pi
+      '@secure-exec/core':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
       '@types/node':
         specifier: ^22.19.15
         version: 22.19.15
@@ -48,60 +129,32 @@ importers:
         specifier: ^5.9.2
         version: 5.9.3
 
-  examples/ai-agent-type-check:
-    dependencies:
-      '@ai-sdk/anthropic':
-        specifier: ^3.0.58
-        version: 3.0.64(zod@3.25.76)
-      '@secure-exec/typescript':
-        specifier: workspace:*
-        version: link:../../packages/secure-exec-typescript
-      ai:
-        specifier: ^6.0.116
-        version: 6.0.141(zod@3.25.76)
-      secure-exec:
-        specifier: workspace:*
-        version: link:../../packages/secure-exec
-      typescript:
-        specifier: ^5.7.2
-        version: 5.9.3
-      zod:
-        specifier: ^3.24.0
-        version: 3.25.76
-    devDependencies:
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      tsx:
-        specifier: ^4.19.2
-        version: 4.21.0
-
   examples/quickstart:
     dependencies:
+      '@agent-os-pkgs/common':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/git':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
       '@rivet-dev/agent-os-claude':
         specifier: workspace:*
         version: link:../../registry/agent/claude
-      '@rivet-dev/agent-os-common':
-        specifier: workspace:*
-        version: link:../../registry/software/common
       '@rivet-dev/agent-os-core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@rivet-dev/agent-os-git':
-        specifier: workspace:*
-        version: link:../../registry/software/git
       '@rivet-dev/agent-os-opencode':
         specifier: workspace:*
         version: link:../../registry/agent/opencode
       '@rivet-dev/agent-os-pi':
         specifier: workspace:*
         version: link:../../registry/agent/pi
-      '@rivet-dev/agent-os-s3':
-        specifier: workspace:*
-        version: link:../../registry/file-system/s3
       '@rivet-dev/agent-os-sandbox':
         specifier: workspace:*
-        version: link:../../registry/tool/sandbox
+        version: link:../../packages/agent-os-sandbox
+      '@secure-exec/s3':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
       dockerode:
         specifier: ^4.0.9
         version: 4.0.10
@@ -124,6 +177,34 @@ importers:
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
+
+  packages/agent-os-sandbox:
+    dependencies:
+      '@rivet-dev/agent-os-core':
+        specifier: workspace:*
+        version: link:../core
+      '@secure-exec/sandbox':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
+      sandbox-agent:
+        specifier: ^0.4.2
+        version: 0.4.2(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
+      zod:
+        specifier: ^4.1.11
+        version: 4.3.6
+    devDependencies:
+      '@agent-os-pkgs/common':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.19.15
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.15)
 
   packages/browser:
     dependencies:
@@ -152,6 +233,12 @@ importers:
       '@rivet-dev/agent-os-sidecar':
         specifier: workspace:*
         version: link:../sidecar-binary
+      '@rivetkit/bare-ts':
+        specifier: ^0.6.2
+        version: 0.6.2
+      '@secure-exec/core':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
       '@xterm/headless':
         specifier: ^6.0.0
         version: 6.0.0
@@ -161,9 +248,6 @@ importers:
       croner:
         specifier: ^10.0.1
         version: 10.0.1
-      esbuild:
-        specifier: ^0.27.4
-        version: 0.27.4
       googleapis:
         specifier: ^144.0.0
         version: 144.0.0
@@ -176,22 +260,67 @@ importers:
       minimatch:
         specifier: ^10.2.4
         version: 10.2.5
-      node-stdlib-browser:
-        specifier: ^1.3.1
-        version: 1.3.1
-      undici:
-        specifier: ^7.24.6
-        version: 7.24.6
-      web-streams-polyfill:
-        specifier: ^3.3.3
-        version: 3.3.3
     devDependencies:
+      '@agent-os-pkgs/codex':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/coreutils':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/curl':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/diffutils':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/fd':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/file':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/findutils':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/gawk':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/git':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/grep':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/gzip':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/jq':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/ripgrep':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/sed':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/tar':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/tree':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/yq':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
       '@anthropic-ai/claude-agent-sdk':
         specifier: ^0.2.87
         version: 0.2.87(@cfworker/json-schema@4.1.1)(zod@4.3.6)
       '@anthropic-ai/claude-code':
         specifier: ^2.1.86
         version: 2.1.87
+      '@bare-ts/tools':
+        specifier: 0.15.0
+        version: 0.15.0(@bare-ts/lib@0.4.0)
       '@browserbasehq/browse-cli':
         specifier: 0.5.0
         version: 0.5.0(@cfworker/json-schema@4.1.1)(@opentelemetry/api@1.9.0)(bufferutil@4.1.0)(deepmerge@4.3.1)(zod@4.3.6)
@@ -210,45 +339,9 @@ importers:
       '@rivet-dev/agent-os-claude':
         specifier: link:../../registry/agent/claude
         version: link:../../registry/agent/claude
-      '@rivet-dev/agent-os-codex':
-        specifier: link:../../registry/software/codex
-        version: link:../../registry/software/codex
       '@rivet-dev/agent-os-codex-agent':
         specifier: link:../../registry/agent/codex
         version: link:../../registry/agent/codex
-      '@rivet-dev/agent-os-coreutils':
-        specifier: link:../../registry/software/coreutils
-        version: link:../../registry/software/coreutils
-      '@rivet-dev/agent-os-curl':
-        specifier: link:../../registry/software/curl
-        version: link:../../registry/software/curl
-      '@rivet-dev/agent-os-diffutils':
-        specifier: link:../../registry/software/diffutils
-        version: link:../../registry/software/diffutils
-      '@rivet-dev/agent-os-fd':
-        specifier: link:../../registry/software/fd
-        version: link:../../registry/software/fd
-      '@rivet-dev/agent-os-file':
-        specifier: link:../../registry/software/file
-        version: link:../../registry/software/file
-      '@rivet-dev/agent-os-findutils':
-        specifier: link:../../registry/software/findutils
-        version: link:../../registry/software/findutils
-      '@rivet-dev/agent-os-gawk':
-        specifier: link:../../registry/software/gawk
-        version: link:../../registry/software/gawk
-      '@rivet-dev/agent-os-git':
-        specifier: link:../../registry/software/git
-        version: link:../../registry/software/git
-      '@rivet-dev/agent-os-grep':
-        specifier: link:../../registry/software/grep
-        version: link:../../registry/software/grep
-      '@rivet-dev/agent-os-gzip':
-        specifier: link:../../registry/software/gzip
-        version: link:../../registry/software/gzip
-      '@rivet-dev/agent-os-jq':
-        specifier: link:../../registry/software/jq
-        version: link:../../registry/software/jq
       '@rivet-dev/agent-os-opencode':
         specifier: link:../../registry/agent/opencode
         version: link:../../registry/agent/opencode
@@ -258,24 +351,15 @@ importers:
       '@rivet-dev/agent-os-pi-cli':
         specifier: link:../../registry/agent/pi-cli
         version: link:../../registry/agent/pi-cli
-      '@rivet-dev/agent-os-ripgrep':
-        specifier: link:../../registry/software/ripgrep
-        version: link:../../registry/software/ripgrep
-      '@rivet-dev/agent-os-s3':
-        specifier: link:../../registry/file-system/s3
-        version: link:../../registry/file-system/s3
-      '@rivet-dev/agent-os-sed':
-        specifier: link:../../registry/software/sed
-        version: link:../../registry/software/sed
-      '@rivet-dev/agent-os-tar':
-        specifier: link:../../registry/software/tar
-        version: link:../../registry/software/tar
-      '@rivet-dev/agent-os-tree':
-        specifier: link:../../registry/software/tree
-        version: link:../../registry/software/tree
-      '@rivet-dev/agent-os-yq':
-        specifier: link:../../registry/software/yq
-        version: link:../../registry/software/yq
+      '@rivet-dev/agent-os-sandbox':
+        specifier: link:../agent-os-sandbox
+        version: link:../agent-os-sandbox
+      '@secure-exec/google-drive':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@secure-exec/s3':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
       '@types/node':
         specifier: ^22.10.2
         version: 22.19.15
@@ -354,8 +438,8 @@ importers:
   packages/posix:
     dependencies:
       '@secure-exec/core':
-        specifier: ^0.2.1
-        version: 0.2.1
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
     devDependencies:
       '@types/node':
         specifier: ^22.10.2
@@ -376,14 +460,14 @@ importers:
   packages/python:
     dependencies:
       '@secure-exec/core':
-        specifier: ^0.2.1
-        version: 0.2.1
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
       pyodide:
         specifier: ^0.28.3
         version: 0.28.3(bufferutil@4.1.0)
     devDependencies:
       '@secure-exec/nodejs':
-        specifier: ^0.2.1
+        specifier: 'catalog:'
         version: 0.2.1
       '@types/node':
         specifier: ^22.10.2
@@ -394,15 +478,6 @@ importers:
       vitest:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.19.15)
-
-  packages/registry-types:
-    devDependencies:
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.7.2
-        version: 5.9.3
 
   packages/secure-exec:
     dependencies:
@@ -419,6 +494,34 @@ importers:
       vitest:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.19.15)
+
+  packages/secure-exec-example-ai-agent-type-check:
+    dependencies:
+      '@ai-sdk/anthropic':
+        specifier: ^3.0.58
+        version: 3.0.64(zod@3.25.76)
+      '@secure-exec/typescript':
+        specifier: workspace:*
+        version: link:../secure-exec-typescript
+      ai:
+        specifier: ^6.0.116
+        version: 6.0.141(zod@3.25.76)
+      secure-exec:
+        specifier: workspace:*
+        version: link:../secure-exec
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      zod:
+        specifier: ^3.24.0
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.19.15
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
 
   packages/secure-exec-typescript:
     dependencies:
@@ -438,39 +541,39 @@ importers:
 
   packages/shell:
     dependencies:
-      '@rivet-dev/agent-os-codex':
-        specifier: 0.0.260331072558
-        version: 0.0.260331072558
-      '@rivet-dev/agent-os-common':
-        specifier: 0.0.260331072558
-        version: 0.0.260331072558
+      '@agent-os-pkgs/codex':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/common':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/fd':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/file':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/jq':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/ripgrep':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/tree':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/unzip':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/yq':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/zip':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
       '@rivet-dev/agent-os-core':
         specifier: workspace:*
         version: link:../core
-      '@rivet-dev/agent-os-fd':
-        specifier: 0.0.260331072558
-        version: 0.0.260331072558
-      '@rivet-dev/agent-os-file':
-        specifier: 0.0.260331072558
-        version: 0.0.260331072558
-      '@rivet-dev/agent-os-jq':
-        specifier: 0.0.260331072558
-        version: 0.0.260331072558
-      '@rivet-dev/agent-os-ripgrep':
-        specifier: 0.0.260331072558
-        version: 0.0.260331072558
-      '@rivet-dev/agent-os-tree':
-        specifier: 0.0.260331072558
-        version: 0.0.260331072558
-      '@rivet-dev/agent-os-unzip':
-        specifier: 0.0.260331072558
-        version: 0.0.260331072558
-      '@rivet-dev/agent-os-yq':
-        specifier: 0.0.260331072558
-        version: 0.0.260331072558
-      '@rivet-dev/agent-os-zip':
-        specifier: 0.0.260331072558
-        version: 0.0.260331072558
     devDependencies:
       '@types/node':
         specifier: ^22.19.3
@@ -511,9 +614,9 @@ importers:
 
   registry/agent/codex:
     dependencies:
-      '@rivet-dev/agent-os-codex':
-        specifier: workspace:*
-        version: link:../../software/codex
+      '@agent-os-pkgs/codex':
+        specifier: 'catalog:'
+        version: 0.0.0-split-runtime-preview.5d46b14
     devDependencies:
       '@types/node':
         specifier: ^22.10.2
@@ -579,486 +682,6 @@ importers:
         specifier: ^5.7.2
         version: 5.9.3
 
-  registry/file-system/google-drive:
-    dependencies:
-      '@rivet-dev/agent-os-core':
-        specifier: workspace:*
-        version: link:../../../packages/core
-    devDependencies:
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.7.2
-        version: 5.9.3
-      vitest:
-        specifier: ^2.1.8
-        version: 2.1.9(@types/node@22.19.15)
-
-  registry/file-system/s3:
-    dependencies:
-      '@rivet-dev/agent-os-core':
-        specifier: workspace:*
-        version: link:../../../packages/core
-    devDependencies:
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.7.2
-        version: 5.9.3
-      vitest:
-        specifier: ^2.1.8
-        version: 2.1.9(@types/node@22.19.15)
-
-  registry/software/build-essential:
-    dependencies:
-      '@rivet-dev/agent-os-common':
-        specifier: workspace:*
-        version: link:../common
-      '@rivet-dev/agent-os-curl':
-        specifier: workspace:*
-        version: link:../curl
-      '@rivet-dev/agent-os-git':
-        specifier: workspace:*
-        version: link:../git
-      '@rivet-dev/agent-os-make':
-        specifier: workspace:*
-        version: link:../make
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/codex:
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: workspace:*
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/common:
-    dependencies:
-      '@rivet-dev/agent-os-coreutils':
-        specifier: workspace:*
-        version: link:../coreutils
-      '@rivet-dev/agent-os-diffutils':
-        specifier: workspace:*
-        version: link:../diffutils
-      '@rivet-dev/agent-os-findutils':
-        specifier: workspace:*
-        version: link:../findutils
-      '@rivet-dev/agent-os-gawk':
-        specifier: workspace:*
-        version: link:../gawk
-      '@rivet-dev/agent-os-grep':
-        specifier: workspace:*
-        version: link:../grep
-      '@rivet-dev/agent-os-gzip':
-        specifier: workspace:*
-        version: link:../gzip
-      '@rivet-dev/agent-os-sed':
-        specifier: workspace:*
-        version: link:../sed
-      '@rivet-dev/agent-os-tar':
-        specifier: workspace:*
-        version: link:../tar
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/coreutils:
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/curl:
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/diffutils:
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/duckdb:
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/everything:
-    dependencies:
-      '@rivet-dev/agent-os-codex':
-        specifier: workspace:*
-        version: link:../codex
-      '@rivet-dev/agent-os-coreutils':
-        specifier: workspace:*
-        version: link:../coreutils
-      '@rivet-dev/agent-os-curl':
-        specifier: workspace:*
-        version: link:../curl
-      '@rivet-dev/agent-os-diffutils':
-        specifier: workspace:*
-        version: link:../diffutils
-      '@rivet-dev/agent-os-fd':
-        specifier: workspace:*
-        version: link:../fd
-      '@rivet-dev/agent-os-file':
-        specifier: workspace:*
-        version: link:../file
-      '@rivet-dev/agent-os-findutils':
-        specifier: workspace:*
-        version: link:../findutils
-      '@rivet-dev/agent-os-gawk':
-        specifier: workspace:*
-        version: link:../gawk
-      '@rivet-dev/agent-os-grep':
-        specifier: workspace:*
-        version: link:../grep
-      '@rivet-dev/agent-os-gzip':
-        specifier: workspace:*
-        version: link:../gzip
-      '@rivet-dev/agent-os-jq':
-        specifier: workspace:*
-        version: link:../jq
-      '@rivet-dev/agent-os-ripgrep':
-        specifier: workspace:*
-        version: link:../ripgrep
-      '@rivet-dev/agent-os-sed':
-        specifier: workspace:*
-        version: link:../sed
-      '@rivet-dev/agent-os-tar':
-        specifier: workspace:*
-        version: link:../tar
-      '@rivet-dev/agent-os-tree':
-        specifier: workspace:*
-        version: link:../tree
-      '@rivet-dev/agent-os-unzip':
-        specifier: workspace:*
-        version: link:../unzip
-      '@rivet-dev/agent-os-yq':
-        specifier: workspace:*
-        version: link:../yq
-      '@rivet-dev/agent-os-zip':
-        specifier: workspace:*
-        version: link:../zip
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/fd:
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/file:
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/findutils:
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/gawk:
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/git:
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/grep:
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/gzip:
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/http-get:
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/jq:
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/make:
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/ripgrep:
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/sed:
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/sqlite3:
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/tar:
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/tree:
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/unzip:
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/wget:
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/yq:
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/software/zip:
-    devDependencies:
-      '@rivet-dev/agent-os-registry-types':
-        specifier: link:../../../packages/registry-types
-        version: link:../../../packages/registry-types
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
-  registry/tool/sandbox:
-    dependencies:
-      '@rivet-dev/agent-os-core':
-        specifier: workspace:*
-        version: link:../../../packages/core
-      sandbox-agent:
-        specifier: ^0.4.2
-        version: 0.4.2(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
-      zod:
-        specifier: ^4.1.11
-        version: 4.3.6
-    devDependencies:
-      '@copilotkit/llmock':
-        specifier: ^1.6.0
-        version: 1.6.0
-      '@rivet-dev/agent-os-common':
-        specifier: link:../../software/common
-        version: link:../../software/common
-      '@rivet-dev/agent-os-pi':
-        specifier: link:../../agent/pi
-        version: link:../../agent/pi
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
-      typescript:
-        specifier: ^5.7.2
-        version: 5.9.3
-      vitest:
-        specifier: ^2.1.8
-        version: 2.1.9(@types/node@22.19.15)
-
   scripts/publish:
     dependencies:
       commander:
@@ -1088,6 +711,66 @@ importers:
         version: 5.9.3
 
 packages:
+
+  '@agent-os-pkgs/codex@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-2Mz+uSOf1CdmeqPMWQznuaVym3bWufen610Gdyq4I49+rX2jx0ODervga0sdzPkBqBzG7OaBmo6mO4sQ3T2DzA==}
+
+  '@agent-os-pkgs/common@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-6TzgaSZzgDdgQzY1Zgb4zAlzvb49NYuXK1gNDjWAfQeivz2NcWyfaN1qPRATHXOtpGUGm05Z65OwjLF05tTbNg==}
+
+  '@agent-os-pkgs/coreutils@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-AOOiAYcPfFvTDzwpV2U6n0/lxJXuUhbq67Tt7HRiIyG76e4zHTSzAu55RoW/24myRsKVjRw5jPA0hB413TuEQA==}
+
+  '@agent-os-pkgs/curl@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-zx/FtXon8YFeylWyvfsChbyWgRiS66dWzXA3EY+xayoxKYcUja06MnE1nRuxgpH8n1CaAz1sIGG1J2w6+ivoYw==}
+
+  '@agent-os-pkgs/diffutils@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-i38lpZ24rm8nt4ImGuZ2KQBjI/ohADkponspwbHWiqR6t3jBKggg4PaSq3xcxY8O8rZ/05Igq1YBlrDh33Y4hQ==}
+
+  '@agent-os-pkgs/fd@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-Mi9yQe6xKlNImLUuLPedCA9DDmT6rk5O65/Q/y0t1nbdJ3sUdkOIRcLVZx+VayK4abhqy7MdmRPSp2fnlg6D3A==}
+
+  '@agent-os-pkgs/file@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-7vNMpudDFE/Xvam4nJO9RA/Y+Q551uLVuCDbkAjPAQpfMZbezVNYueARLDbbQ0xmmAX56PS9SkGN6id5VxxTNw==}
+
+  '@agent-os-pkgs/findutils@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-9IwymPoxtJveSB+HppgAUII05JBYGNhP9QSys5NoPSiaEOlIhcAVoKZHq6XFGyr33MhWmHyy3KEyrXFnkan+9Q==}
+
+  '@agent-os-pkgs/gawk@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-zjuyTyjXCz6LgZZqdA14vcgmyzjR5Ipeb3hlL+Tn3sCfAGp+Y7GSbTO9yBtTv8fkWNGOLq8il5zQJkJlHHMMfg==}
+
+  '@agent-os-pkgs/git@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-t11XTiymguMC1GpRlbNQ2NaXX/fyG4BN2HBJtHEl63vGNR/RPnddX28mnQJ8UVj7aZQO9366PmKLEshIw+HgcA==}
+
+  '@agent-os-pkgs/grep@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-xworE1A81YCKzXY2uW+2oK6BiB7YzEvcxU/RVxI7Psveylpfdlr/GJOVGfjyHTPi30hhDik3TEPSowS1WJqAfg==}
+
+  '@agent-os-pkgs/gzip@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-j8WENZbxekTBuMzLQCgqaA9vkkGGDn57mg/H4VaIIoiOWnUkKJMYbZ26twP0s6RbKDCe0vNWiAKDukhxe5jezQ==}
+
+  '@agent-os-pkgs/jq@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-2hHQJaxL2rcvu2JIXkvtHLM+nWXPkFgx8W3mkj5U8xskCRG56hgn/E/2P12dqoapieh9pcCqTqqZUPiqr8MqLQ==}
+
+  '@agent-os-pkgs/ripgrep@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-Gy6DGVpVhqMdBlRPUTF9N2tdWUvt2nbGVYV/ewLdfr61eO1KFlpVh9fc3qHD9DisVODivb+0vpk23pNAUp3b0A==}
+
+  '@agent-os-pkgs/sed@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-uPEuPNIve/IOLYb9kJDFv8LDisg0jjcvdwLqdm9kacvOuc19wjhUZG2xPB8cjzKCgNtDN91jN+uo8F9no+oQBA==}
+
+  '@agent-os-pkgs/tar@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-mkh3mZtalQJ3n7M4769q30hvYSbI8wEIUF3LS9IzMQ9XfHW4NmIbGjDDrJxTuv8DepsN6SMS4lkNXjbY5yh4DQ==}
+
+  '@agent-os-pkgs/tree@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-UqhPk5Hw/XSiF1BdfpW3R4kmiKYoiv9Wr1ZiZbmrh9w40st3LuhLrlCx3n8E/dZQ/6lgupFTe/fe6SYp+D0t9Q==}
+
+  '@agent-os-pkgs/unzip@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-s/G9m0K+dO6UmcTeazx35DmKpGZpm4BUntLts4eXEmL+5e/VpKT3HIHRf5CK17vPe/VxESrLqnBq1Hri0NSqRg==}
+
+  '@agent-os-pkgs/yq@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-IuNOKGlmVGF98IU4iMaJCuZbbaG00p50w3lH2FxrPNndeayTM0Z05JKQr2gMKX8Hnlq1+c7wIffkx7RqIAtelw==}
+
+  '@agent-os-pkgs/zip@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-ksS4rn0jN1Dt63Kx9vRxJiJ4kBCbT9j5kabZ/zcJBh22pEU3hwIiPoB63SZyop19gu9UMe2M/5B4/2wMhAwGnw==}
 
   '@agentclientprotocol/sdk@0.12.0':
     resolution: {integrity: sha512-V8uH/KK1t7utqyJmTA7y7DzKu6+jKFIXM+ZVouz8E55j8Ej2RV42rEvPKn3/PpBJlliI5crcGk1qQhZ7VwaepA==}
@@ -1438,6 +1121,17 @@ packages:
 
   '@balena/dockerignore@1.0.2':
     resolution: {integrity: sha512-wMue2Sy4GAVTk6Ic4tJVcnfdau+gx2EnG7S+uAEe+TWJFqE4YoWN4/H8MSLj4eYJKxGg26lZwboEniNiNwZQ6Q==}
+
+  '@bare-ts/lib@0.4.0':
+    resolution: {integrity: sha512-uTb12lcDkvwwwGb/4atNy/+2Xuksx88tlxKuwnDuxmsOFVo4R/WsE+fmAf2nWtzHDi7m6NDw8Ke9j+XlNBLoJg==}
+    engines: {node: ^14.18.0 || >=16.0.0}
+
+  '@bare-ts/tools@0.15.0':
+    resolution: {integrity: sha512-YMDrsZjyzW0rFMya0CgNDwR8O0rH1QdbZG1jZblwvt0dCCxbAseapnc3BZ5h1/bkJ9mYdPTedge0S7UaQzZKmg==}
+    engines: {node: '>=16.9.0'}
+    hasBin: true
+    peerDependencies:
+      '@bare-ts/lib': '>=0.3.0 <=0.4.0'
 
   '@biomejs/biome@2.4.10':
     resolution: {integrity: sha512-xxA3AphFQ1geij4JTHXv4EeSTda1IFn22ye9LdyVPoJU19fNVl0uzfEuhsfQ4Yue/0FaLs2/ccVi4UDiE7R30w==}
@@ -2217,59 +1911,9 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
-  '@rivet-dev/agent-os-codex@0.0.260331072558':
-    resolution: {integrity: sha512-Fs+w0vkr/z1tjIWg52OYytttXXiQFkS1ahVm28SjlusTFLy156ofai7me2ZDYnfCsA4DvKi/T5XFBl/2z5oBGg==}
-
-  '@rivet-dev/agent-os-common@0.0.260331072558':
-    resolution: {integrity: sha512-bkMU6yqLxNLoXYA2/f2qRf0JrlqbIiBRKRpP3d+tbmF+VV2wrAY+iLJDHN6Jw+Q8q3CkT6jB5KTnCZkcYEF3RQ==}
-
-  '@rivet-dev/agent-os-coreutils@0.0.260331072558':
-    resolution: {integrity: sha512-vI/J2MJnpsJQZ7F5DU/udGqGMtliqhTg28lE6XZ/qEGyjUvmEQ9AiV8CaAcX5HrImAUWOofBbTv6/XGKjOhT1w==}
-
-  '@rivet-dev/agent-os-diffutils@0.0.260331072558':
-    resolution: {integrity: sha512-OiTesXIVqGjEHm/LBvqa20kBu8b+W741EyjRptDKkBju+nQY1hKs0+qFE3vSuBe8N8I7F1GdoXUdwzj8easong==}
-
-  '@rivet-dev/agent-os-fd@0.0.260331072558':
-    resolution: {integrity: sha512-mTy1EGKm8dqV7gFcOv4JyDoYynRgEKNIxPcdEW9tK2PkQO/OPfnIDPbBVExowIn90R+fpAQl0RbNip9U6lotng==}
-
-  '@rivet-dev/agent-os-file@0.0.260331072558':
-    resolution: {integrity: sha512-o/MElu1v1M7Z4hod3XO1VAU5doVEeHJSqX9cLVH/Jaw8B7M/xvCMOuQr8cU1nLF6q34ZNCfExOycRWCeFTCxUA==}
-
-  '@rivet-dev/agent-os-findutils@0.0.260331072558':
-    resolution: {integrity: sha512-Bqc85t0jDJlDj/3afLg4iuzk1qGVHMroRx6HDEWQ2kdishfVMTMUSfac+q5IbqUOaQquhf3ixZzTt+utyc7Qew==}
-
-  '@rivet-dev/agent-os-gawk@0.0.260331072558':
-    resolution: {integrity: sha512-Y2vW1ox1C0ky0Wij2RLLt3NKRY8/pghoy5CM0fDU91bAnWMyB2Jn7aD/GsluK7h8X8ptwqL0q8E1szASIlJK4A==}
-
-  '@rivet-dev/agent-os-grep@0.0.260331072558':
-    resolution: {integrity: sha512-VlBOteHBFlAtlKfh1abk0FouJwgtqAXEqQGFU8Gnk6FLNgRss5S0yXBnj9p0qwrmZsKlopljrKJIpJp1GCwJrw==}
-
-  '@rivet-dev/agent-os-gzip@0.0.260331072558':
-    resolution: {integrity: sha512-id9iOrZFAuaXaFWIIiQEo70Ze/poI7hodSqWfo9ro0sajV0xI7kSp0BbXgS4PvGc9O2+VWcOE2qzqTUnKNlBzQ==}
-
-  '@rivet-dev/agent-os-jq@0.0.260331072558':
-    resolution: {integrity: sha512-bTDtT8tOMx6M8oQ9GoNo3s/nOxbbiDWLWqUjhJweNNVBp8AMPixJ2kq3jbgiUPepHZtScYRWjQkUggGjb1BgQw==}
-
-  '@rivet-dev/agent-os-ripgrep@0.0.260331072558':
-    resolution: {integrity: sha512-RX1S6M2T2ghTqkkBHyesm5dFWaQsIrr6EEIlk6UdFYS0G7pcZ11UvTgeirVr2yOvyPRlRrA7FcmupHadQ1wrbw==}
-
-  '@rivet-dev/agent-os-sed@0.0.260331072558':
-    resolution: {integrity: sha512-i/6ifWCcGE2TEfPWR5ig5tMVKUc0qL0ng59htgS+sqt6zdMaPIllwVztOgXNxMEdFM1TF646e/OkMfMzmYZDCA==}
-
-  '@rivet-dev/agent-os-tar@0.0.260331072558':
-    resolution: {integrity: sha512-LAa8fm4jombNBQRR42O/57WxY6VA13Uea8JFChh6yPN4VtFP84KI5Kg4/Zzne3YDronGZlgJivznNUH3dtTMzA==}
-
-  '@rivet-dev/agent-os-tree@0.0.260331072558':
-    resolution: {integrity: sha512-6/+agxo9rKWT7I6i0Fk8oGxKWYyiM0mHsTr2QLB8d0Lz/Bax/pv7ca0E+IwfFaEG1J19LgTnrxf/9YwUSThF7Q==}
-
-  '@rivet-dev/agent-os-unzip@0.0.260331072558':
-    resolution: {integrity: sha512-W+TkYvcgzaC3+Sc07NckEG45/dVM+k/Ez4KVjIxmwNdrgiMsqPKZvnBIlMX0C6nXjnE6PUlVcdU/Qq+Uvp0mbA==}
-
-  '@rivet-dev/agent-os-yq@0.0.260331072558':
-    resolution: {integrity: sha512-vUx12neBEWp3v9Lhbkx6eT9pMTdbcmQQEK8kugepfqRiYjus2VpN7KCotaTDSnMPZlqoUhQC7Nu8PMwUgwN5IQ==}
-
-  '@rivet-dev/agent-os-zip@0.0.260331072558':
-    resolution: {integrity: sha512-v4Y6FvgyLSENCmUUZMUtC2pDIC1dpUq9NGg5ODAWliOOj/8ahFhMa1hTRWb4gKZQjQOevrlJTfBcmJ4FaObgYw==}
+  '@rivetkit/bare-ts@0.6.2':
+    resolution: {integrity: sha512-3qndQUQXLdwafMEqfhz24hUtDPcsf1Bu3q52Kb8MqeH8JUh3h6R4HYW3ZJXiQsLcyYyFM68PuIwlLRlg1xDEpg==}
+    engines: {node: ^14.18.0 || >=16.0.0}
 
   '@rollup/rollup-android-arm-eabi@4.60.1':
     resolution: {integrity: sha512-d6FinEBLdIiK+1uACUttJKfgZREXrF0Qc2SmLII7W2AD8FfiZ9Wjd+rD/iRuf5s5dWrr1GgwXCvPqOuDquOowA==}
@@ -2428,11 +2072,33 @@ packages:
     resolution: {integrity: sha512-trO//ypJBSt5xkewuol9LOykvDgHwUXq8R+yQVS+0CmpN3lYUtewHkb+At9RVGRhDMmJZY2oasaXDnhfurQ33w==}
     hasBin: true
 
+  '@secure-exec/core@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-U7oWReKG4K+7o0x+nP2qx0CUYGoO2RvRbUZJXhy2iG2ce+Axe/+o5j/NaondRu1C37Tx2EjVwjP1hNhmD0DTNA==}
+
   '@secure-exec/core@0.2.1':
     resolution: {integrity: sha512-HsnUv6gClpMA1BBRmX86j30TKTZtgJC/fO1tVavr7IpM2zNKbHU8LgSlBd7mv2SNy02ImTmU/GnQ3aYB4NSbEg==}
 
+  '@secure-exec/google-drive@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-va7ZZZPTnEmYUCVHutX0oiq/B5dFvCVMCWTb4CVn4lbkIyqb9erCELPklJpUZVS7iztLYxyf/yJpWuhAddXZdw==}
+
   '@secure-exec/nodejs@0.2.1':
     resolution: {integrity: sha512-UJMJqVFxexlHJV0Q9nWURvrz6GElj8673DDOOFln6FHR6JS+9SaSU3eISrN158DuNC3SFi4rgjb/scKnK4YOYQ==}
+
+  '@secure-exec/s3@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-X7stPV4f5/J+t3qBd/8YQFty9iNFNCD7ipAp0rwVDVNdhjA1xyAMKvQXfG11rbe2Y5o1P43k5cT6Z10pZtFevw==}
+
+  '@secure-exec/sandbox@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-/CS91LGj03r0ylUeb+5uf+dKt9w/gcBXo11dvtfs6ZNSf0TRSayvHxHEwagN7ABarOGJT3uc1DEhp63/XsGGUQ==}
+
+  '@secure-exec/sidecar-linux-x64-gnu@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-litPZ/HgzA1VjjOGaBuP5uLj6PXiTGJJF7q12NXM7xN+nqFrSDRrwgByPde4TxX2kbk1zP+hYM08S+qqdrAwxQ==}
+    engines: {node: '>=20'}
+    cpu: [x64]
+    os: [linux]
+
+  '@secure-exec/sidecar@0.0.0-split-runtime-preview.5d46b14':
+    resolution: {integrity: sha512-Zfj6i7UNikc4SXtyBYRcMydHFEsrmUT0VnG8lt8hTz6Ux6YgBmIXmzMZntyJnDfa+ayJoYbNnfcjEiy4AvTr8Q==}
+    engines: {node: '>=20'}
 
   '@secure-exec/v8-darwin-arm64@0.2.1':
     resolution: {integrity: sha512-gEWhMHzUpLwzuBNAD0lVkZXE8wFlWMLp4IOZ+56FYwOW/C+m07cYxuW4TjHyPqZ+vPm3IkoaMqqH5yT9VhjX/Q==}
@@ -3148,6 +2814,10 @@ packages:
   combined-stream@1.0.8:
     resolution: {integrity: sha512-FQN4MRfuJeHf7cBbBMJFXhKSDq+2kAArBlmRBvcvFE5BB1HZKXtSFASDhdlz9zOYwxh8lDdnvmMOe/+5cdoEdg==}
     engines: {node: '>= 0.8'}
+
+  commander@11.1.0:
+    resolution: {integrity: sha512-yPVavfyCcRhmorC7rWlkHn15b4wDVgVmBA7kV4QVBsF7kv/9TKJAbAXVTxvTnwP8HHKjRCJDClKbciiYS7p0DQ==}
+    engines: {node: '>=16'}
 
   commander@12.1.0:
     resolution: {integrity: sha512-Vw8qHK3bZM9y/P10u3Vib8o/DdkvA2OtPtZvD871QKjy74Wj1WSKFILMPRPSdUSx5RFK1arlJzEtA4PkFgnbuA==}
@@ -5135,6 +4805,55 @@ packages:
 
 snapshots:
 
+  '@agent-os-pkgs/codex@0.0.0-split-runtime-preview.5d46b14': {}
+
+  '@agent-os-pkgs/common@0.0.0-split-runtime-preview.5d46b14':
+    dependencies:
+      '@agent-os-pkgs/coreutils': 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/diffutils': 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/findutils': 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/gawk': 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/grep': 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/gzip': 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/sed': 0.0.0-split-runtime-preview.5d46b14
+      '@agent-os-pkgs/tar': 0.0.0-split-runtime-preview.5d46b14
+
+  '@agent-os-pkgs/coreutils@0.0.0-split-runtime-preview.5d46b14': {}
+
+  '@agent-os-pkgs/curl@0.0.0-split-runtime-preview.5d46b14': {}
+
+  '@agent-os-pkgs/diffutils@0.0.0-split-runtime-preview.5d46b14': {}
+
+  '@agent-os-pkgs/fd@0.0.0-split-runtime-preview.5d46b14': {}
+
+  '@agent-os-pkgs/file@0.0.0-split-runtime-preview.5d46b14': {}
+
+  '@agent-os-pkgs/findutils@0.0.0-split-runtime-preview.5d46b14': {}
+
+  '@agent-os-pkgs/gawk@0.0.0-split-runtime-preview.5d46b14': {}
+
+  '@agent-os-pkgs/git@0.0.0-split-runtime-preview.5d46b14': {}
+
+  '@agent-os-pkgs/grep@0.0.0-split-runtime-preview.5d46b14': {}
+
+  '@agent-os-pkgs/gzip@0.0.0-split-runtime-preview.5d46b14': {}
+
+  '@agent-os-pkgs/jq@0.0.0-split-runtime-preview.5d46b14': {}
+
+  '@agent-os-pkgs/ripgrep@0.0.0-split-runtime-preview.5d46b14': {}
+
+  '@agent-os-pkgs/sed@0.0.0-split-runtime-preview.5d46b14': {}
+
+  '@agent-os-pkgs/tar@0.0.0-split-runtime-preview.5d46b14': {}
+
+  '@agent-os-pkgs/tree@0.0.0-split-runtime-preview.5d46b14': {}
+
+  '@agent-os-pkgs/unzip@0.0.0-split-runtime-preview.5d46b14': {}
+
+  '@agent-os-pkgs/yq@0.0.0-split-runtime-preview.5d46b14': {}
+
+  '@agent-os-pkgs/zip@0.0.0-split-runtime-preview.5d46b14': {}
+
   '@agentclientprotocol/sdk@0.12.0(zod@3.25.76)':
     dependencies:
       zod: 3.25.76
@@ -5887,6 +5606,13 @@ snapshots:
   '@babel/runtime@7.29.2': {}
 
   '@balena/dockerignore@1.0.2': {}
+
+  '@bare-ts/lib@0.4.0': {}
+
+  '@bare-ts/tools@0.15.0(@bare-ts/lib@0.4.0)':
+    dependencies:
+      '@bare-ts/lib': 0.4.0
+      commander: 11.1.0
 
   '@biomejs/biome@2.4.10':
     optionalDependencies:
@@ -6674,50 +6400,7 @@ snapshots:
       - supports-color
     optional: true
 
-  '@rivet-dev/agent-os-codex@0.0.260331072558': {}
-
-  '@rivet-dev/agent-os-common@0.0.260331072558':
-    dependencies:
-      '@rivet-dev/agent-os-coreutils': 0.0.260331072558
-      '@rivet-dev/agent-os-diffutils': 0.0.260331072558
-      '@rivet-dev/agent-os-findutils': 0.0.260331072558
-      '@rivet-dev/agent-os-gawk': 0.0.260331072558
-      '@rivet-dev/agent-os-grep': 0.0.260331072558
-      '@rivet-dev/agent-os-gzip': 0.0.260331072558
-      '@rivet-dev/agent-os-sed': 0.0.260331072558
-      '@rivet-dev/agent-os-tar': 0.0.260331072558
-
-  '@rivet-dev/agent-os-coreutils@0.0.260331072558': {}
-
-  '@rivet-dev/agent-os-diffutils@0.0.260331072558': {}
-
-  '@rivet-dev/agent-os-fd@0.0.260331072558': {}
-
-  '@rivet-dev/agent-os-file@0.0.260331072558': {}
-
-  '@rivet-dev/agent-os-findutils@0.0.260331072558': {}
-
-  '@rivet-dev/agent-os-gawk@0.0.260331072558': {}
-
-  '@rivet-dev/agent-os-grep@0.0.260331072558': {}
-
-  '@rivet-dev/agent-os-gzip@0.0.260331072558': {}
-
-  '@rivet-dev/agent-os-jq@0.0.260331072558': {}
-
-  '@rivet-dev/agent-os-ripgrep@0.0.260331072558': {}
-
-  '@rivet-dev/agent-os-sed@0.0.260331072558': {}
-
-  '@rivet-dev/agent-os-tar@0.0.260331072558': {}
-
-  '@rivet-dev/agent-os-tree@0.0.260331072558': {}
-
-  '@rivet-dev/agent-os-unzip@0.0.260331072558': {}
-
-  '@rivet-dev/agent-os-yq@0.0.260331072558': {}
-
-  '@rivet-dev/agent-os-zip@0.0.260331072558': {}
+  '@rivetkit/bare-ts@0.6.2': {}
 
   '@rollup/rollup-android-arm-eabi@4.60.1':
     optional: true
@@ -6822,9 +6505,18 @@ snapshots:
       '@sandbox-agent/cli-win32-x64': 0.4.2
     optional: true
 
+  '@secure-exec/core@0.0.0-split-runtime-preview.5d46b14':
+    dependencies:
+      '@rivetkit/bare-ts': 0.6.2
+      '@secure-exec/sidecar': 0.0.0-split-runtime-preview.5d46b14
+
   '@secure-exec/core@0.2.1':
     dependencies:
       better-sqlite3: 12.8.0
+
+  '@secure-exec/google-drive@0.0.0-split-runtime-preview.5d46b14':
+    dependencies:
+      '@secure-exec/core': 0.0.0-split-runtime-preview.5d46b14
 
   '@secure-exec/nodejs@0.2.1':
     dependencies:
@@ -6836,6 +6528,33 @@ snapshots:
       esbuild: 0.27.4
       node-stdlib-browser: 1.3.1
       web-streams-polyfill: 4.2.0
+
+  '@secure-exec/s3@0.0.0-split-runtime-preview.5d46b14':
+    dependencies:
+      '@secure-exec/core': 0.0.0-split-runtime-preview.5d46b14
+
+  '@secure-exec/sandbox@0.0.0-split-runtime-preview.5d46b14(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)':
+    dependencies:
+      '@secure-exec/core': 0.0.0-split-runtime-preview.5d46b14
+      sandbox-agent: 0.4.2(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
+    transitivePeerDependencies:
+      - '@cloudflare/sandbox'
+      - '@daytonaio/sdk'
+      - '@e2b/code-interpreter'
+      - '@fly/sprites'
+      - '@vercel/sandbox'
+      - computesdk
+      - dockerode
+      - get-port
+      - modal
+      - zod
+
+  '@secure-exec/sidecar-linux-x64-gnu@0.0.0-split-runtime-preview.5d46b14':
+    optional: true
+
+  '@secure-exec/sidecar@0.0.0-split-runtime-preview.5d46b14':
+    optionalDependencies:
+      '@secure-exec/sidecar-linux-x64-gnu': 0.0.0-split-runtime-preview.5d46b14
 
   '@secure-exec/v8-darwin-arm64@0.2.1':
     optional: true
@@ -7726,6 +7445,8 @@ snapshots:
   combined-stream@1.0.8:
     dependencies:
       delayed-stream: 1.0.0
+
+  commander@11.1.0: {}
 
   commander@12.1.0: {}
 

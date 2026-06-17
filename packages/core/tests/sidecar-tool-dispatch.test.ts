@@ -1,4 +1,4 @@
-import common from "@rivet-dev/agent-os-common";
+import common from "@agent-os-pkgs/common";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { z } from "zod";
 import { AgentOs, hostTool, toolKit } from "../src/index.js";

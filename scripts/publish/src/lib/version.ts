@@ -41,6 +41,36 @@ const DEP_FIELDS = [
 	"optionalDependencies",
 ] as const;
 
+/**
+ * Parse the default `catalog:` block from pnpm-workspace.yaml into a
+ * name -> version map. Lightweight line parser (no YAML dep): reads entries
+ * under a top-level `catalog:` key until the next non-indented key.
+ */
+async function readPnpmCatalog(repoRoot: string): Promise<Map<string, string>> {
+	const map = new Map<string, string>();
+	let text: string;
+	try {
+		text = await fs.readFile(join(repoRoot, "pnpm-workspace.yaml"), "utf8");
+	} catch {
+		return map;
+	}
+	const lines = text.split("\n");
+	let inCatalog = false;
+	for (const line of lines) {
+		if (/^catalog:\s*$/.test(line)) {
+			inCatalog = true;
+			continue;
+		}
+		if (inCatalog) {
+			// A non-indented, non-comment, non-blank line ends the block.
+			if (/^\S/.test(line) && !line.startsWith("#")) break;
+			const m = line.match(/^\s+'?([^':\s]+)'?\s*:\s*'?([^'\s#]+)'?/);
+			if (m) map.set(m[1], m[2]);
+		}
+	}
+	return map;
+}
+
 export interface BumpOptions {
 	/** If true, report actions but do not write. */
 	dryRun?: boolean;
@@ -81,6 +111,9 @@ export async function bumpPackageJsons(
 	const packageNames = new Set(packages.map((p) => p.name));
 	const metaPlatformMap = buildMetaPlatformMap(packages);
 	const versionOnly = opts.versionOnly ?? false;
+	// pnpm `catalog:` specs are a workspace-only protocol; `npm publish` does not
+	// resolve them, so rewrite them to the literal catalog version pre-publish.
+	const catalog = await readPnpmCatalog(repoRoot);
 
 	let updated = 0;
 	for (const pkg of packages) {
@@ -105,9 +138,13 @@ export async function bumpPackageJsons(
 				const deps = pkgJson[field];
 				if (!deps) continue;
 				for (const [dep, spec] of Object.entries(deps)) {
-					const isWorkspace =
-						typeof spec === "string" && spec.startsWith("workspace:");
-					if (!isWorkspace) continue;
+					if (typeof spec !== "string") continue;
+					if (spec === "catalog:" || spec.startsWith("catalog:")) {
+						const resolved = catalog.get(dep);
+						if (resolved) deps[dep] = resolved;
+						continue;
+					}
+					if (!spec.startsWith("workspace:")) continue;
 					const isOurPkg =
 						packageNames.has(dep) || dep.startsWith("@rivet-dev/agent-os-");
 					if (!isOurPkg) continue;
@@ -132,11 +169,13 @@ export async function bumpPackageJsons(
 }
 
 /**
- * Rewrite the Rust workspace version and the lock-step internal crate versions.
+ * Rewrite the a6 Rust workspace version (`[workspace.package]`). a6's own crates
+ * inherit it via `version.workspace = true`.
  *
- * a6 declares internal crate deps as inline tables in `[workspace.dependencies]`,
- * e.g. `agent-os-bridge = { path = "crates/bridge", version = "0.2.0-rc.3" }`,
- * so a single regex rewrites every `version` field next to a `path`.
+ * NOTE: the secure-exec crate dependencies in `[workspace.dependencies]` are
+ * deliberately NOT rewritten — their `version` requirement tracks the sibling
+ * secure-exec crate workspace version (e.g. `0.2.0-rc.3`), which a preview does
+ * not bump. Rewriting them to a6's version breaks the cargo path-dep check.
  */
 export async function bumpCargoVersions(
 	repoRoot: string,
@@ -149,8 +188,11 @@ export async function bumpCargoVersions(
 		/(\[workspace\.package\]\n(?:[^\n]*\n)*?[ \t]*version = )"[^"]+"/,
 		`$1"${version}"`,
 	);
+	// Bump a6-OWNED crate dep requirements (path = "crates/..."). The secure-exec
+	// crate deps (path = "../secure-exec/...") are intentionally NOT bumped — they
+	// track the sibling crate version.
 	next = next.replace(
-		/(agent-os-[a-z0-9-]+ = \{ path = "[^"]+", version = ")[^"]+(" \})/g,
+		/((?:agent-os|secure-exec)-[a-z0-9-]+ = \{ path = "crates\/[^"]+", version = ")[^"]+(" \})/g,
 		`$1${version}$2`,
 	);
 

@@ -1746,7 +1746,7 @@ class WasmVmRuntimeDescriptor implements KernelRuntimeDriver {
 			if (dirOffset === undefined) {
 				continue;
 			}
-			guestPaths.set(name, `/__agentos/commands/${startIndex + dirOffset}/${name}`);
+			guestPaths.set(name, `/__secure_exec/commands/${startIndex + dirOffset}/${name}`);
 		}
 		return guestPaths;
 	}
@@ -1816,9 +1816,9 @@ function sidecarBinaryNeedsBuild(): boolean {
 
 function ensureNativeSidecarBinary(): string {
 	// A published install has no in-repo Cargo workspace to build from: resolve
-	// the prebuilt platform binary (or the AGENT_OS_SIDECAR_BINARY override).
+	// the prebuilt platform binary (or the AGENT_OS_SIDECAR_BIN override).
 	if (
-		process.env.AGENT_OS_SIDECAR_BINARY ||
+		process.env.AGENT_OS_SIDECAR_BIN ||
 		!fsSync.existsSync(path.join(REPO_ROOT, "Cargo.toml"))
 	) {
 		return resolvePublishedSidecarBinary();
@@ -2065,7 +2065,7 @@ function collectGuestCommandPaths(
 		if (!guestPaths.has(entry.name)) {
 			guestPaths.set(
 				entry.name,
-				`/__agentos/commands/${startIndex + entry.dirOffset}/${entry.name}`,
+				`/__secure_exec/commands/${startIndex + entry.dirOffset}/${entry.name}`,
 			);
 		}
 	}
@@ -2474,7 +2474,7 @@ class NativeKernel implements Kernel {
 		const allCommandDirs = [...this.mountedCommandDirs, ...commandDirs];
 		const sidecarMounts = allCommandDirs.map((commandDir, index) =>
 			serializeMountConfigForSidecar({
-				path: `/__agentos/commands/${index}`,
+				path: `/__secure_exec/commands/${index}`,
 				readOnly: true,
 				plugin: {
 					id: "host_dir",

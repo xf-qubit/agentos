@@ -1,4 +1,4 @@
-import common, { coreutils } from "@rivet-dev/agent-os-common";
+import common, { coreutils } from "@agent-os-pkgs/common";
 import pi from "@rivet-dev/agent-os-pi";
 import { afterEach, describe, expect, test } from "vitest";
 import { AgentOs } from "../src/agent-os.js";

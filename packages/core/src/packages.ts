@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { dirname, join, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { PermissionTier } from "./runtime.js";
 
 /**
@@ -42,6 +43,12 @@ export function resolvePackageDir(
 
 import type { AgentConfig } from "./agents.js";
 import type { Kernel } from "./runtime-compat.js";
+
+const LOCAL_REGISTRY_COMMAND_DIR = resolve(
+	dirname(fileURLToPath(import.meta.url)),
+	"../../..",
+	"registry/native/target/wasm32-wasip1/release/commands",
+);
 
 // ── Software Descriptor Types ────────────────────────────────────────
 
@@ -105,7 +112,7 @@ export interface WasmCommandSoftwareDescriptor extends SoftwareDescriptor {
 
 /**
  * Any object with a commandDir property is treated as a WASM command package.
- * This allows registry packages (e.g., @rivet-dev/agent-os-coreutils) to be
+ * This allows registry packages (e.g., @agent-os-pkgs/coreutils) to be
  * passed directly to the `software` option without wrapping.
  */
 export interface WasmCommandDirDescriptor {
@@ -411,11 +418,38 @@ function collectCommandMetadata(
 		}
 	}
 
+	const commandDir = resolveLocalCommandDirFallback(pkg.commandDir, declaredCommands);
+
 	return {
-		commandDir: pkg.commandDir,
+		commandDir,
 		declaredCommands,
 		aliases,
 	};
+}
+
+function hasUsableCommandDir(commandDir: string, declaredCommands: string[]): boolean {
+	if (!existsSync(commandDir)) {
+		return false;
+	}
+
+	return declaredCommands.every((commandName) =>
+		existsSync(join(commandDir, commandName)),
+	);
+}
+
+function resolveLocalCommandDirFallback(
+	commandDir: string,
+	declaredCommands: string[],
+): string {
+	if (
+		declaredCommands.length === 0 ||
+		hasUsableCommandDir(commandDir, declaredCommands) ||
+		!hasUsableCommandDir(LOCAL_REGISTRY_COMMAND_DIR, declaredCommands)
+	) {
+		return commandDir;
+	}
+
+	return LOCAL_REGISTRY_COMMAND_DIR;
 }
 
 function collectRegistryPackagePermissions(
@@ -488,16 +522,18 @@ export function processSoftware(software: SoftwareInput[]): ProcessedSoftware {
 	for (const pkg of flat) {
 		if (!isTypedDescriptor(pkg)) {
 			// Duck-typed: any object with commandDir is a WASM command source.
-			commandDirs.push(pkg.commandDir);
-			commandPackages.push(collectCommandMetadata(pkg));
+			const commandMetadata = collectCommandMetadata(pkg);
+			commandDirs.push(commandMetadata.commandDir);
+			commandPackages.push(commandMetadata);
 			collectRegistryPackagePermissions(commandPermissions, pkg);
 			continue;
 		}
 
 		switch (pkg.type) {
 			case "wasm-commands": {
-				commandDirs.push(pkg.commandDir);
-				commandPackages.push(collectCommandMetadata(pkg));
+				const commandMetadata = collectCommandMetadata(pkg);
+				commandDirs.push(commandMetadata.commandDir);
+				commandPackages.push(commandMetadata);
 				collectTypedDescriptorPermissions(commandPermissions, pkg);
 				break;
 			}

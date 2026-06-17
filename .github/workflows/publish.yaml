@@ -40,7 +40,7 @@ concurrency:
 env:
   R2_BUCKET: rivet-releases
   R2_ENDPOINT: https://2a94c6a0ced8d35ea63cddc86c2681e7.r2.cloudflarestorage.com
-  # Platform list kept in sync with packages/sidecar-binary/npm/* and the build
+  # Platform list kept in sync with packages/*sidecar*/npm/* and the build
   # matrix below. Also consumed by scripts/publish discovery via SIDECAR_PLATFORMS.
   # arm64 is deferred until its portability fix is verified end-to-end.
   SIDECAR_PLATFORMS: "linux-x64-gnu"
@@ -75,7 +75,7 @@ jobs:
         run: pnpm --filter=publish exec tsx src/ci/bin.ts context-output
 
   # ---------------------------------------------------------------------------
-  # build-sidecar — debug (preview) or release (release) sidecar binary
+  # build-sidecar — debug (preview) or release (release) sidecar binaries
   # ---------------------------------------------------------------------------
   build-sidecar:
     needs: [context]
@@ -109,23 +109,37 @@ jobs:
           key: ${{ runner.os }}-${{ matrix.target }}-rusty-v8-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-${{ matrix.target }}-rusty-v8-
+      # agent-os-sidecar path-depends on the secure-exec crates, which live in the
+      # sibling repo (preview crates are not published to crates.io). Clone the
+      # matching preview branch and install its pnpm workspace so the V8 bridge
+      # build (invoked by secure-exec's cargo build.rs) has esbuild + bridge srcs.
+      - name: Checkout secure-exec sibling
+        run: |
+          git clone --depth 1 --branch split/runtime-preview \
+            https://github.com/rivet-dev/secure-exec.git ../secure-exec
+          (cd ../secure-exec && pnpm install --frozen-lockfile)
       # The V8 bridge build script (invoked by cargo build.rs) needs the pnpm
       # workspace installed so esbuild and v8-bridge.source.js are available.
       - run: pnpm install --frozen-lockfile
       - name: Build sidecar binary
         id: build
         run: |
+          set -euo pipefail
+          out="target/sidecar-artifacts/${{ matrix.platform }}"
+          mkdir -p "$out"
           if [ "${{ needs.context.outputs.trigger }}" = "release" ]; then
             cargo build --release -p agent-os-sidecar --target ${{ matrix.target }}
-            echo "bin=target/${{ matrix.target }}/release/agent-os-sidecar" >> "$GITHUB_OUTPUT"
+            profile="release"
           else
             cargo build -p agent-os-sidecar --target ${{ matrix.target }}
-            echo "bin=target/${{ matrix.target }}/debug/agent-os-sidecar" >> "$GITHUB_OUTPUT"
+            profile="debug"
           fi
+          cp "target/${{ matrix.target }}/${profile}/agent-os-sidecar" "$out/agent-os-sidecar"
+          echo "dir=$out" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: sidecar-${{ matrix.platform }}
-          path: ${{ steps.build.outputs.bin }}
+          path: ${{ steps.build.outputs.dir }}
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
@@ -154,19 +168,19 @@ jobs:
         run: |
           set -euo pipefail
           for p in $SIDECAR_PLATFORMS; do
-            bin="artifacts/sidecar-${p}/agent-os-sidecar"
-            dest="packages/sidecar-binary/npm/${p}"
-            if [ ! -f "$bin" ]; then
-              echo "::error::missing sidecar binary artifact for ${p}"
+            agent_bin="artifacts/sidecar-${p}/agent-os-sidecar"
+            agent_dest="packages/sidecar-binary/npm/${p}"
+            if [ ! -f "$agent_bin" ]; then
+              echo "::error::missing agent-os-sidecar binary artifact for ${p}"
               exit 1
             fi
-            if [ ! -d "$dest" ]; then
-              echo "::error::missing platform package dir $dest"
+            if [ ! -d "$agent_dest" ]; then
+              echo "::error::missing platform package dir $agent_dest"
               exit 1
             fi
-            cp "$bin" "${dest}/agent-os-sidecar"
-            chmod +x "${dest}/agent-os-sidecar"
-            echo "Placed binary for ${p}"
+            cp "$agent_bin" "${agent_dest}/agent-os-sidecar"
+            chmod +x "${agent_dest}/agent-os-sidecar"
+            echo "Placed binaries for ${p}"
           done
       - name: Bump package versions for build (version-only)
         run: |
@@ -176,7 +190,6 @@ jobs:
       - name: Build TypeScript packages
         run: |
           npx turbo build \
-            --filter='!./registry/software/*' \
             --filter='!@rivet-dev/agent-os-playground' \
             --filter='!./examples/*'
       - name: Finalize package versions for publish (inject optionalDeps)
@@ -231,12 +244,12 @@ jobs:
           # (downloaded by the published execution crate's build.rs).
           mkdir -p release-assets
           for p in $SIDECAR_PLATFORMS; do
-            bin="artifacts/sidecar-${p}/agent-os-sidecar"
-            if [ -f "$bin" ]; then
+            agent_bin="artifacts/sidecar-${p}/agent-os-sidecar"
+            if [ -f "$agent_bin" ]; then
               target="${PLATFORM_TARGET[$p]}"
-              cp "$bin" "release-assets/agent-os-sidecar-${target}"
+              cp "$agent_bin" "release-assets/agent-os-sidecar-${target}"
             else
-              echo "::warning::no binary for ${p}"
+              echo "::warning::missing agent-os-sidecar binary for ${p}"
             fi
           done
           for f in \
@@ -306,27 +319,20 @@ jobs:
           key: ${{ runner.os }}-x86_64-unknown-linux-gnu-rusty-v8-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-x86_64-unknown-linux-gnu-rusty-v8-
+      # a6 crates path-depend on the secure-exec runtime crates (sibling repo).
+      # Clone the matching preview branch + install its pnpm workspace so the V8
+      # bridge build (secure-exec's cargo build.rs) has esbuild + bridge sources.
+      - name: Checkout secure-exec sibling
+        run: |
+          git clone --depth 1 --branch split/runtime-preview \
+            https://github.com/rivet-dev/secure-exec.git ../secure-exec
+          (cd ../secure-exec && pnpm install --frozen-lockfile)
       - run: pnpm install --frozen-lockfile
       - name: Bump Cargo versions
         run: |
           pnpm --filter=publish exec tsx src/ci/bin.ts bump-versions \
             --version ${{ needs.context.outputs.version }} \
             --version-only
-      - name: Stage vendored V8 bridge bundles + base-filesystem for publishing
-        run: |
-          set -euo pipefail
-          for crate in execution v8-runtime; do
-            out="crates/${crate}/assets/generated"
-            mkdir -p "$out"
-            node packages/core/scripts/build-v8-bridge.mjs --out-dir "$out"
-          done
-          # The generated bundles are gitignored, and `cargo package` honors
-          # gitignore. Force them into the git index so they get packaged into
-          # the published crate (consumed by build_support.rs at build time).
-          git add -f crates/execution/assets/generated crates/v8-runtime/assets/generated
-          # Refresh the vendored base-filesystem fixtures used by published crates.
-          cp packages/core/fixtures/base-filesystem.json crates/kernel/assets/base-filesystem.json
-          cp packages/core/fixtures/base-filesystem.json crates/sidecar/assets/base-filesystem.json
       - name: Dry-run crate publish (preview)
         if: ${{ needs.context.outputs.trigger != 'release' }}
         run: |

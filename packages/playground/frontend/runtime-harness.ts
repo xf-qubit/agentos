@@ -59,7 +59,19 @@ type HarnessSmokeResponse = HarnessExecResponse & {
 	workerUrl: string;
 };
 
-interface AgentOsBrowserHarness {
+type HarnessExtensionDispatchResponse =
+	| {
+			ok: true;
+			namespace: string;
+			payload: number[];
+	  }
+	| {
+			ok: false;
+			errorMessage: string;
+			errorCode?: string;
+	  };
+
+interface SecureExecBrowserHarness {
 	createRuntime(
 		options?: HarnessCreateRuntimeOptions,
 	): Promise<HarnessCreateRuntimeResponse>;
@@ -75,12 +87,17 @@ interface AgentOsBrowserHarness {
 		code: string,
 		delayMs?: number,
 	): Promise<HarnessTerminatePendingResponse>;
+	dispatchExtensionRequest(
+		runtimeId: string,
+		namespace: string,
+		payload: number[],
+	): Promise<HarnessExtensionDispatchResponse>;
 	smoke(): Promise<HarnessSmokeResponse>;
 }
 
 declare global {
 	interface Window {
-		__agentOsBrowserHarness?: AgentOsBrowserHarness;
+		__secureExecBrowserHarness?: SecureExecBrowserHarness;
 	}
 }
 
@@ -135,7 +152,7 @@ function getRuntimeDebugState(
 	};
 }
 
-const harness: AgentOsBrowserHarness = {
+const harness: SecureExecBrowserHarness = {
 	async createRuntime(options) {
 		const system = await createBrowserDriver({
 			filesystem: options?.filesystem ?? "memory",
@@ -238,6 +255,34 @@ const harness: AgentOsBrowserHarness = {
 		};
 	},
 
+	async dispatchExtensionRequest(runtimeId, namespace, payload) {
+		const entry = requireRuntime(runtimeId);
+		const browserRuntime = entry.runtime as NodeRuntimeDriver & {
+			dispatchExtensionRequest(
+				namespace: string,
+				payload: Uint8Array,
+			): Promise<Uint8Array>;
+		};
+		try {
+			const response = await browserRuntime.dispatchExtensionRequest(
+				namespace,
+				new Uint8Array(payload),
+			);
+			return {
+				ok: true,
+				namespace,
+				payload: Array.from(response),
+			};
+		} catch (error) {
+			const typedError = error as { message?: string; code?: string };
+			return {
+				ok: false,
+				errorMessage: typedError.message ?? String(error),
+				errorCode: typedError.code,
+			};
+		}
+	},
+
 	async smoke() {
 		const { runtimeId } = await harness.createRuntime();
 		try {
@@ -255,5 +300,5 @@ const harness: AgentOsBrowserHarness = {
 	},
 };
 
-window.__agentOsBrowserHarness = harness;
+window.__secureExecBrowserHarness = harness;
 setStatus("ready", "ready");

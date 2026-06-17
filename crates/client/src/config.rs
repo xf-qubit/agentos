@@ -127,7 +127,7 @@ impl AgentOsConfigBuilder {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SoftwareKind {
-    /// A directory of wasm command binaries. Mounted at `/__agentos/commands/{index}/` so the
+    /// A directory of wasm command binaries. Mounted at `/__secure_exec/commands/{index}/` so the
     /// sidecar's command discovery can resolve guest commands (`echo`, `sh`, `grep`, ...).
     #[default]
     WasmCommands,
@@ -150,7 +150,7 @@ pub struct SoftwareInput {
 
 /// A host-side tool execute callback. Receives the validated JSON input, returns a JSON result or an
 /// error string. Stays host-side (never crosses to the guest); the guest invokes it by name via the
-/// sidecar tool-invocation callback channel.
+/// sidecar host-callback channel.
 pub type ToolCallback = Arc<
     dyn Fn(
             serde_json::Value,
@@ -164,7 +164,7 @@ pub type ToolCallback = Arc<
 pub struct HostTool {
     pub name: String,
     pub description: String,
-    /// JSON Schema for the tool input (forwarded to the sidecar `register_toolkit` definition).
+    /// JSON Schema for the tool input (forwarded to the sidecar `register_host_callbacks` definition).
     pub input_schema: serde_json::Value,
     pub timeout_ms: Option<u64>,
     /// Host-side implementation, invoked when the guest calls `<toolkit>:<tool>`.
@@ -173,7 +173,7 @@ pub struct HostTool {
 
 /// A registered tool kit (in-process; tool implementations stay host-side). Tools are exposed to the
 /// guest as `<toolkit>:<tool>` and dispatched back to [`HostTool::execute`] via the sidecar
-/// tool-invocation callback channel.
+/// host-callback channel.
 #[derive(Clone)]
 pub struct ToolKit {
     pub name: String,

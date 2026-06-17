@@ -39,6 +39,7 @@ import {
 } from "./sync-bridge.js";
 import type {
 	BrowserWorkerExecOptions,
+	BrowserWorkerExtensionResponse,
 	BrowserWorkerInitPayload,
 	BrowserWorkerOutboundMessage,
 	BrowserWorkerRequestMessage,
@@ -639,6 +640,18 @@ export class BrowserRuntimeDriver implements NodeRuntimeDriver {
 			},
 			hook,
 		);
+	}
+
+	async dispatchExtensionRequest(
+		namespace: string,
+		payload: Uint8Array,
+	): Promise<Uint8Array> {
+		await this.ready;
+		const response = await this.callWorker<BrowserWorkerExtensionResponse>(
+			"extension",
+			{ namespace, payload },
+		);
+		return response.payload;
 	}
 
 	dispose(): void {

@@ -1,5 +1,5 @@
 import { AgentOs, type SoftwareInput } from "@rivet-dev/agent-os-core";
-import { coreutils } from "@rivet-dev/agent-os-common";
+import { coreutils } from "@agent-os-pkgs/common";
 import claude from "@rivet-dev/agent-os-claude";
 import pi from "@rivet-dev/agent-os-pi";
 import { LLMock } from "@copilotkit/llmock";

@@ -230,6 +230,7 @@ type PiSdkRuntime = {
 		resourceLoader?: MinimalResourceLoaderLike;
 		settingsManager?: SettingsManagerInstanceLike;
 		tools?: PiToolLike[];
+		customTools?: PiToolLike[];
 	}): Promise<{ session: PiSessionLike; modelFallbackMessage?: string }>;
 	createCodingTools(
 		cwd: string,
@@ -669,6 +670,7 @@ async function createAgentSession(options: {
 		resourceLoader: options.resourceLoader,
 		settingsManager,
 		tools: options.tools,
+		customTools: options.tools,
 	});
 }
 
@@ -730,6 +732,7 @@ class PiSdkAgent implements Agent {
 		params: NewSessionRequest,
 	): Promise<NewSessionResponse> {
 		this.cwd = params.cwd;
+		process.chdir(params.cwd);
 		const agentDir = join(process.env.HOME || "/home/user", ".pi", "agent");
 		const {
 			DefaultResourceLoader,

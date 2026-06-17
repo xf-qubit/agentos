@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import {
 	createRuntime,
+	dispatchExtensionRequest,
 	disposeAllRuntimes,
 	execRuntime,
 	getLastStdioMessage,
@@ -14,6 +15,29 @@ test.beforeEach(async ({ page }) => {
 
 test.afterEach(async ({ page }) => {
 	await disposeAllRuntimes(page);
+});
+
+test("routes extension control messages through browser worker postMessage", async ({
+	page,
+}) => {
+	const { runtimeId } = await createRuntime(page);
+
+	const response = await dispatchExtensionRequest(
+		page,
+		runtimeId,
+		"dev.secure-exec.browser-extension-smoke",
+		[112, 105, 110, 103],
+	);
+
+	if (response.ok) {
+		throw new Error("extension dispatch unexpectedly succeeded");
+	}
+	expect(response.errorCode).toBe(
+		"ERR_SECURE_EXEC_BROWSER_EXTENSION_UNSUPPORTED",
+	);
+	expect(response.errorMessage).toContain(
+		"Browser worker extension dispatch is not implemented for namespace dev.secure-exec.browser-extension-smoke",
+	);
 });
 
 test("preserves sync filesystem and module loading parity in a real Chromium worker", async ({

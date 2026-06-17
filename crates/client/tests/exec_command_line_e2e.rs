@@ -80,4 +80,6 @@ async fn exec_command_line_paths() {
         os.exec("   ", ExecOptions::default()).await.is_err(),
         "empty command line must error"
     );
+
+    os.shutdown().await.expect("shutdown");
 }

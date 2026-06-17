@@ -1,7 +1,0 @@
-{
-  "name": "@rivet-dev/agent-os-gzip",
-  "type": "wasm",
-  "description": "GNU gzip compression (gzip, gunzip, zcat)",
-  "aptName": "gzip",
-  "source": "rust"
-}

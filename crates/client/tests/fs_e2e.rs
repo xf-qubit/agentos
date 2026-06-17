@@ -7,30 +7,27 @@
 
 mod common;
 
-use agent_os_client::fs::{BatchWriteEntry, DeleteOptions, FileContent, MkdirOptions};
 use agent_os_client::ClientError;
+use agent_os_client::fs::{
+    BatchWriteEntry, DeleteOptions, DirEntryType, FileContent, MkdirOptions,
+};
 
 #[tokio::test]
-async fn base_layer_exposes_agentos_instructions() {
+async fn base_layer_exposes_default_files() {
     if !common::sidecar_available() {
-        eprintln!("skipping base_layer_exposes_agentos_instructions: sidecar binary not built");
+        eprintln!("skipping base_layer_exposes_default_files: sidecar binary not built");
         return;
     }
-    let os = common::new_vm().await;
+    let os = common::new_vm_with_sidecar_pool("fs-base-layer").await;
 
     // A known base-layer file reads (sanity that the bundled base is applied).
-    let hostname = os.read_file("/etc/hostname").await.expect("read /etc/hostname");
+    let hostname = os
+        .read_file("/etc/hostname")
+        .await
+        .expect("read /etc/hostname");
     assert!(!hostname.is_empty());
 
-    // The baked OS instructions must be present so createSession can read them.
-    let instructions = os
-        .read_file("/etc/agentos/instructions.md")
-        .await
-        .expect("read /etc/agentos/instructions.md");
-    assert!(
-        String::from_utf8_lossy(&instructions).contains("agentOS"),
-        "instructions content should be the baked system prompt"
-    );
+    os.shutdown().await.expect("shutdown");
 }
 
 #[tokio::test]
@@ -38,7 +35,7 @@ async fn filesystem_surface_round_trips() {
     if !common::require_sidecar("filesystem_surface_round_trips") {
         return;
     }
-    let os = common::new_vm().await;
+    let os = common::new_vm_with_sidecar_pool("fs-round-trips").await;
 
     // Text write/read.
     os.write_file("/tmp/a.txt", FileContent::Text("hello".to_string()))
@@ -59,6 +56,21 @@ async fn filesystem_surface_round_trips() {
         os.read_file("/tmp/blob.bin").await.expect("read binary"),
         blob,
         "binary content must round-trip byte-for-byte"
+    );
+
+    let snapshot = os
+        .snapshot_root_filesystem()
+        .await
+        .expect("snapshot root filesystem");
+    assert_eq!(snapshot.source.format, "agent-os-filesystem-snapshot-v1");
+    assert!(
+        snapshot
+            .source
+            .filesystem
+            .entries
+            .iter()
+            .any(|entry| entry.path == "/tmp/blob.bin" && entry.entry_type == DirEntryType::File),
+        "snapshot must include the binary file written through the filesystem surface"
     );
 
     // Recursive mkdir + exists + stat.

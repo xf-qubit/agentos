@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import * as posixPath from "node:path/posix";
 import {
 	createFilesystemFromEntries,
@@ -28,9 +29,9 @@ export interface BaseFilesystemSnapshot {
 	};
 }
 
-const SNAPSHOT_URL = new URL(
-	"../fixtures/base-filesystem.json",
-	import.meta.url,
+const require = createRequire(import.meta.url);
+const SNAPSHOT_PATH = require.resolve(
+	"@secure-exec/core/fixtures/base-filesystem.json",
 );
 const SUPPRESSED_KERNEL_BOOTSTRAP_DIRS = new Set([
 	"/boot",
@@ -49,7 +50,7 @@ function loadSnapshot(): BaseFilesystemSnapshot {
 	}
 
 	snapshotCache = JSON.parse(
-		readFileSync(SNAPSHOT_URL, "utf-8"),
+		readFileSync(SNAPSHOT_PATH, "utf-8"),
 	) as BaseFilesystemSnapshot;
 
 	return snapshotCache;

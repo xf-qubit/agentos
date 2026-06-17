@@ -12,7 +12,7 @@ description: Run an E2E smoke test that installs agent-os packages from npm in a
 
 ## What it tests
 
-1. `npm install` of `@rivet-dev/agent-os-core`, `@rivet-dev/agent-os-pi`, `@rivet-dev/agent-os-common` from the public npm registry
+1. `npm install` of `@rivet-dev/agent-os-core`, `@rivet-dev/agent-os-pi`, `@agent-os-pkgs/common` from the public npm registry
 2. Boot a VM with WASM coreutils (bash, cat, sh, etc.) and the Pi SDK ACP adapter
 3. Create a Pi agent session with a real Anthropic API key
 4. Send a prompt that uses the **write tool** to create `/tmp/test.txt` with "Hello from Agent OS!" and the **bash tool** to run `cat /tmp/test.txt`
@@ -38,7 +38,7 @@ Create a temp directory (e.g. `/tmp/agent-os-sanity-XXXX`) with two files:
   "dependencies": {
     "@rivet-dev/agent-os-core": "*",
     "@rivet-dev/agent-os-pi": "*",
-    "@rivet-dev/agent-os-common": "*",
+    "@agent-os-pkgs/common": "*",
     "@mariozechner/pi-coding-agent": "^0.60.0",
     "@agentclientprotocol/sdk": "^0.16.1"
   }
@@ -50,7 +50,7 @@ If the user specifies a version (e.g. "use rc.3"), pin `@rivet-dev/agent-os-core
 **test.mjs:**
 ```js
 import { AgentOs } from "@rivet-dev/agent-os-core";
-import common from "@rivet-dev/agent-os-common";
+import common from "@agent-os-pkgs/common";
 import pi from "@rivet-dev/agent-os-pi";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
@@ -135,4 +135,4 @@ Remove the temp directory after the test completes.
 - Always use a fresh temp directory — never run in the repo itself.
 - Always install from the public npm registry — never use local links.
 - If Docker mode, clean up the container's node_modules via `docker run --rm` before removing the host temp dir.
-- Report the installed versions of `@rivet-dev/agent-os-core` and `@rivet-dev/agent-os-common` in the output.
+- Report the installed versions of `@rivet-dev/agent-os-core` and `@agent-os-pkgs/common` in the output.

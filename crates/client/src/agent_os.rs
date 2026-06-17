@@ -5,40 +5,39 @@
 //! channels so `&self` methods never need an outer lock. Module files add only `impl AgentOs` blocks
 //! and never introduce new struct fields.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use scc::{HashMap as SccHashMap, HashSet as SccHashSet};
+use serde::Deserialize;
+use serde_json::{Map, Value};
 use tokio::sync::{broadcast, oneshot, watch};
 use tokio::task::JoinHandle;
 
-use agent_os_sidecar::protocol::{
-    ConfigureVmRequest, CreateVmRequest, DisposeReason, DisposeVmRequest, EventPayload,
-    FsPermissionRule as WireFsPermissionRule, FsPermissionRuleSet as WireFsPermissionRuleSet,
-    FsPermissionScope, GuestRuntimeKind, KillProcessRequest, MountDescriptor,
-    MountPluginDescriptor, OpenSessionRequest, OwnershipScope,
-    PatternPermissionRule as WirePatternPermissionRule,
-    PatternPermissionRuleSet as WirePatternPermissionRuleSet, PatternPermissionScope,
-    PermissionMode as WirePermissionMode, PermissionsPolicy, RegisterToolkitRequest,
-    RegisteredToolDefinition, RequestPayload, ResponsePayload, RootFilesystemDescriptor,
-    SidecarPermissionResultResponse, SidecarPlacement, SidecarRequestPayload,
-    SidecarResponsePayload, SoftwareDescriptor, ToolInvocationRequest,
-    ToolInvocationResultResponse, VmLifecycleState,
+use agent_os_protocol::ACP_EXTENSION_NAMESPACE;
+use agent_os_protocol::generated::v1::{
+    AcpCallback, AcpCallbackResponse, AcpEvent, AcpHostRequestCallbackResponse,
+    AcpPermissionCallbackResponse,
 };
+use secure_exec_client::wire;
 
-use crate::config::{AgentOsConfig, HostTool, MountConfig, SoftwareKind, TimerScheduleDriver};
+use crate::config::{
+    AgentOsConfig, HostTool, MountConfig, PermissionMode, Permissions, SoftwareKind,
+    TimerScheduleDriver, ToolKit,
+};
 use crate::cron::CronManager;
 use crate::error::ClientError;
-use crate::json_rpc::SequencedEvent;
+use crate::json_rpc::JsonRpcNotification;
 use crate::process::SYNTHETIC_PID_BASE;
 use crate::session::{
-    AgentCapabilities, AgentInfo, PermissionReply, PermissionRequest, SessionConfigOption,
-    SessionModeState,
+    AgentCapabilities, AgentInfo, PermissionReply, PermissionRequest, PermissionRouteRequest,
+    PermissionRouteResult, SessionConfigOption, SessionModeState, record_live_session_event,
 };
 use crate::sidecar::{AgentOsSidecar, AgentOsSidecarPlacement, AgentOsSidecarVmLease};
-use crate::transport::{SidecarCallback, SidecarTransport};
+use crate::transport::{SidecarTransport, WireSidecarCallback};
+use secure_exec_client::TransportError;
 
 use once_cell::sync::OnceCell;
 
@@ -93,12 +92,7 @@ pub(crate) struct SessionEntry {
     pub capabilities: parking_lot::Mutex<Option<AgentCapabilities>>,
     pub agent_info: parking_lot::Mutex<Option<AgentInfo>>,
     pub config_overrides: parking_lot::Mutex<std::collections::BTreeMap<String, String>>,
-    /// Bounded event ring (cap [`crate::ACP_SESSION_EVENT_RETENTION_LIMIT`]).
-    pub event_ring: parking_lot::Mutex<VecDeque<SequencedEvent>>,
-    /// Highest seen sequence number (ack-based; separate from the truncated ring; negative for
-    /// synthetic events).
-    pub highest_sequence_number: AtomicI64,
-    pub event_tx: broadcast::Sender<SequencedEvent>,
+    pub event_tx: broadcast::Sender<JsonRpcNotification>,
     pub permission_tx: broadcast::Sender<PermissionRequest>,
     pub pending_permission_replies: SccHashMap<String, oneshot::Sender<PermissionReply>>,
     pub pending_session_request_lock: parking_lot::Mutex<()>,
@@ -192,28 +186,56 @@ impl AgentOs {
         let sidecar = match &config.sidecar {
             Some(crate::config::AgentOsSidecarConfig::Explicit { handle }) => handle.clone(),
             Some(crate::config::AgentOsSidecarConfig::Shared { pool }) => {
-                AgentOs::get_shared_sidecar(pool.clone(), config.sidecar_binary_path.clone()).await?
+                AgentOs::get_shared_sidecar(pool.clone(), config.sidecar_binary_path.clone())
+                    .await?
             }
-            None => {
-                AgentOs::get_shared_sidecar(None, config.sidecar_binary_path.clone()).await?
-            }
+            None => AgentOs::get_shared_sidecar(None, config.sidecar_binary_path.clone()).await?,
         };
         let (transport, connection_id, _) = sidecar.ensure_connection().await?;
 
         // 2. Open a session for this VM (connection scope) on the shared connection.
         let session = match transport
-            .request(
-                OwnershipScope::connection(&connection_id),
-                RequestPayload::OpenSession(OpenSessionRequest {
+            .request_wire(
+                wire_connection_ownership(&connection_id),
+                wire::RequestPayload::OpenSessionRequest(wire::OpenSessionRequest {
                     placement: sidecar_wire_placement(&sidecar),
-                    metadata: BTreeMap::new(),
+                    metadata: HashMap::new(),
                 }),
             )
             .await?
         {
-            ResponsePayload::SessionOpened(opened) => opened,
-            ResponsePayload::Rejected(rejected) => return Err(rejected_to_error(rejected)),
-            _ => {
+            wire::ResponsePayload::SessionOpenedResponse(opened) => opened,
+            wire::ResponsePayload::RejectedResponse(rejected) => {
+                return Err(rejected_to_error(rejected));
+            }
+            wire::ResponsePayload::AuthenticatedResponse(_)
+            | wire::ResponsePayload::VmCreatedResponse(_)
+            | wire::ResponsePayload::VmDisposedResponse(_)
+            | wire::ResponsePayload::RootFilesystemBootstrappedResponse(_)
+            | wire::ResponsePayload::VmConfiguredResponse(_)
+            | wire::ResponsePayload::HostCallbacksRegisteredResponse(_)
+            | wire::ResponsePayload::LayerCreatedResponse(_)
+            | wire::ResponsePayload::LayerSealedResponse(_)
+            | wire::ResponsePayload::SnapshotImportedResponse(_)
+            | wire::ResponsePayload::SnapshotExportedResponse(_)
+            | wire::ResponsePayload::OverlayCreatedResponse(_)
+            | wire::ResponsePayload::GuestFilesystemResultResponse(_)
+            | wire::ResponsePayload::RootFilesystemSnapshotResponse(_)
+            | wire::ResponsePayload::ProcessStartedResponse(_)
+            | wire::ResponsePayload::StdinWrittenResponse(_)
+            | wire::ResponsePayload::StdinClosedResponse(_)
+            | wire::ResponsePayload::ProcessKilledResponse(_)
+            | wire::ResponsePayload::ProcessSnapshotResponse(_)
+            | wire::ResponsePayload::ListenerSnapshotResponse(_)
+            | wire::ResponsePayload::BoundUdpSnapshotResponse(_)
+            | wire::ResponsePayload::SignalStateResponse(_)
+            | wire::ResponsePayload::ZombieTimerCountResponse(_)
+            | wire::ResponsePayload::FilesystemResultResponse(_)
+            | wire::ResponsePayload::PermissionDecisionResponse(_)
+            | wire::ResponsePayload::PersistenceStateResponse(_)
+            | wire::ResponsePayload::PersistenceFlushedResponse(_)
+            | wire::ResponsePayload::VmFetchResponse(_)
+            | wire::ResponsePayload::ExtEnvelope(_) => {
                 return Err(ClientError::Sidecar(
                     "unexpected open_session response".to_string(),
                 ));
@@ -222,25 +244,54 @@ impl AgentOs {
         let session_id = session.session_id;
 
         // 3. Subscribe to events BEFORE CreateVm so the `ready` lifecycle event cannot be missed.
-        let mut events = transport.subscribe_events();
+        let mut events = transport.subscribe_wire_events();
         let permissions = permissions_policy(&config);
 
         // 4. Create the VM (session scope). Default root filesystem keeps the bundled base layer.
         let vm = match transport
-            .request(
-                OwnershipScope::session(&connection_id, &session_id),
-                RequestPayload::CreateVm(CreateVmRequest {
-                    runtime: GuestRuntimeKind::JavaScript,
-                    metadata: BTreeMap::new(),
-                    root_filesystem: RootFilesystemDescriptor::default(),
+            .request_wire(
+                wire_session_ownership(&connection_id, &session_id),
+                wire::RequestPayload::CreateVmRequest(wire::CreateVmRequest {
+                    runtime: wire::GuestRuntimeKind::JavaScript,
+                    metadata: HashMap::new(),
+                    root_filesystem: default_wire_root_filesystem(),
                     permissions: Some(permissions.clone()),
                 }),
             )
             .await?
         {
-            ResponsePayload::VmCreated(created) => created,
-            ResponsePayload::Rejected(rejected) => return Err(rejected_to_error(rejected)),
-            _ => {
+            wire::ResponsePayload::VmCreatedResponse(created) => created,
+            wire::ResponsePayload::RejectedResponse(rejected) => {
+                return Err(rejected_to_error(rejected));
+            }
+            wire::ResponsePayload::AuthenticatedResponse(_)
+            | wire::ResponsePayload::SessionOpenedResponse(_)
+            | wire::ResponsePayload::VmDisposedResponse(_)
+            | wire::ResponsePayload::RootFilesystemBootstrappedResponse(_)
+            | wire::ResponsePayload::VmConfiguredResponse(_)
+            | wire::ResponsePayload::HostCallbacksRegisteredResponse(_)
+            | wire::ResponsePayload::LayerCreatedResponse(_)
+            | wire::ResponsePayload::LayerSealedResponse(_)
+            | wire::ResponsePayload::SnapshotImportedResponse(_)
+            | wire::ResponsePayload::SnapshotExportedResponse(_)
+            | wire::ResponsePayload::OverlayCreatedResponse(_)
+            | wire::ResponsePayload::GuestFilesystemResultResponse(_)
+            | wire::ResponsePayload::RootFilesystemSnapshotResponse(_)
+            | wire::ResponsePayload::ProcessStartedResponse(_)
+            | wire::ResponsePayload::StdinWrittenResponse(_)
+            | wire::ResponsePayload::StdinClosedResponse(_)
+            | wire::ResponsePayload::ProcessKilledResponse(_)
+            | wire::ResponsePayload::ProcessSnapshotResponse(_)
+            | wire::ResponsePayload::ListenerSnapshotResponse(_)
+            | wire::ResponsePayload::BoundUdpSnapshotResponse(_)
+            | wire::ResponsePayload::SignalStateResponse(_)
+            | wire::ResponsePayload::ZombieTimerCountResponse(_)
+            | wire::ResponsePayload::FilesystemResultResponse(_)
+            | wire::ResponsePayload::PermissionDecisionResponse(_)
+            | wire::ResponsePayload::PersistenceStateResponse(_)
+            | wire::ResponsePayload::PersistenceFlushedResponse(_)
+            | wire::ResponsePayload::VmFetchResponse(_)
+            | wire::ResponsePayload::ExtEnvelope(_) => {
                 return Err(ClientError::Sidecar(
                     "unexpected create_vm response".to_string(),
                 ));
@@ -254,11 +305,11 @@ impl AgentOs {
         // Resolve software packages to host roots (port of TS `processSoftware` for the
         // ConfigureVm descriptors). Each `package` is resolved under `module_access_cwd/node_modules`;
         // an unresolvable package is an explicit error rather than a silent no-op. Wasm command
-        // packages additionally become `/__agentos/commands/{index}/` mounts so the sidecar can
+        // packages additionally become `/__secure_exec/commands/{index}/` mounts so the sidecar can
         // discover and resolve guest commands.
         let resolved_software = resolve_software(&config)?;
-        let command_mounts = build_command_mounts(&resolved_software);
-        let software: Vec<SoftwareDescriptor> = resolved_software
+        let command_mounts = build_command_mounts(&resolved_software)?;
+        let software: Vec<wire::SoftwareDescriptor> = resolved_software
             .into_iter()
             .map(|entry| entry.descriptor)
             .collect();
@@ -269,45 +320,76 @@ impl AgentOs {
 
         // 6. Configure the VM (vm scope).
         match transport
-            .request(
-                OwnershipScope::vm(&connection_id, &session_id, &vm_id),
-                RequestPayload::ConfigureVm(ConfigureVmRequest {
+            .request_wire(
+                wire_vm_ownership(&connection_id, &session_id, &vm_id),
+                wire::RequestPayload::ConfigureVmRequest(wire::ConfigureVmRequest {
                     mounts,
                     software,
                     permissions: Some(permissions),
                     module_access_cwd: config.module_access_cwd.clone(),
                     instructions: config.additional_instructions.clone().into_iter().collect(),
                     projected_modules: Vec::new(),
-                    command_permissions: BTreeMap::new(),
+                    command_permissions: HashMap::new(),
                     allowed_node_builtins: config.allowed_node_builtins.clone().unwrap_or_default(),
                     loopback_exempt_ports: config.loopback_exempt_ports.clone(),
                 }),
             )
             .await?
         {
-            ResponsePayload::VmConfigured(_) => {}
-            ResponsePayload::Rejected(rejected) => return Err(rejected_to_error(rejected)),
-            _ => {
+            wire::ResponsePayload::VmConfiguredResponse(_) => {}
+            wire::ResponsePayload::RejectedResponse(rejected) => {
+                return Err(rejected_to_error(rejected));
+            }
+            wire::ResponsePayload::AuthenticatedResponse(_)
+            | wire::ResponsePayload::SessionOpenedResponse(_)
+            | wire::ResponsePayload::VmCreatedResponse(_)
+            | wire::ResponsePayload::VmDisposedResponse(_)
+            | wire::ResponsePayload::RootFilesystemBootstrappedResponse(_)
+            | wire::ResponsePayload::HostCallbacksRegisteredResponse(_)
+            | wire::ResponsePayload::LayerCreatedResponse(_)
+            | wire::ResponsePayload::LayerSealedResponse(_)
+            | wire::ResponsePayload::SnapshotImportedResponse(_)
+            | wire::ResponsePayload::SnapshotExportedResponse(_)
+            | wire::ResponsePayload::OverlayCreatedResponse(_)
+            | wire::ResponsePayload::GuestFilesystemResultResponse(_)
+            | wire::ResponsePayload::RootFilesystemSnapshotResponse(_)
+            | wire::ResponsePayload::ProcessStartedResponse(_)
+            | wire::ResponsePayload::StdinWrittenResponse(_)
+            | wire::ResponsePayload::StdinClosedResponse(_)
+            | wire::ResponsePayload::ProcessKilledResponse(_)
+            | wire::ResponsePayload::ProcessSnapshotResponse(_)
+            | wire::ResponsePayload::ListenerSnapshotResponse(_)
+            | wire::ResponsePayload::BoundUdpSnapshotResponse(_)
+            | wire::ResponsePayload::SignalStateResponse(_)
+            | wire::ResponsePayload::ZombieTimerCountResponse(_)
+            | wire::ResponsePayload::FilesystemResultResponse(_)
+            | wire::ResponsePayload::PermissionDecisionResponse(_)
+            | wire::ResponsePayload::PersistenceStateResponse(_)
+            | wire::ResponsePayload::PersistenceFlushedResponse(_)
+            | wire::ResponsePayload::VmFetchResponse(_)
+            | wire::ResponsePayload::ExtEnvelope(_) => {
                 return Err(ClientError::Sidecar(
                     "unexpected configure_vm response".to_string(),
                 ));
             }
         }
 
-        // 6b. Register host tool kits (if any): forward each tool definition via `register_toolkit`,
+        // 6b. Register host tool kits (if any): forward each tool definition via `register_host_callbacks`,
         //     record the host execute callbacks in the per-VM registry, and install the shared
-        //     tool-invocation callback that routes guest tool calls back to the host by VM.
+        //     host-callback that routes guest tool calls back to the host by VM.
         if !config.tool_kits.is_empty() {
-            let mut tool_map: std::collections::HashMap<String, HostTool> =
-                std::collections::HashMap::new();
+            let mut tool_map: HashMap<String, HostTool> = HashMap::new();
             for kit in &config.tool_kits {
-                let mut tools = BTreeMap::new();
+                let mut tools = HashMap::new();
                 for tool in &kit.tools {
                     tools.insert(
                         tool.name.clone(),
-                        RegisteredToolDefinition {
+                        wire::RegisteredHostCallbackDefinition {
                             description: tool.description.clone(),
-                            input_schema: tool.input_schema.clone(),
+                            input_schema: json_utf8(
+                                &tool.input_schema,
+                                "host callback input schema",
+                            )?,
                             timeout_ms: tool.timeout_ms,
                             examples: Vec::new(),
                         },
@@ -315,27 +397,67 @@ impl AgentOs {
                     tool_map.insert(format!("{}:{}", kit.name, tool.name), tool.clone());
                 }
                 match transport
-                    .request(
-                        OwnershipScope::vm(&connection_id, &session_id, &vm_id),
-                        RequestPayload::RegisterToolkit(RegisterToolkitRequest {
-                            name: kit.name.clone(),
-                            description: kit.description.clone(),
-                            tools,
-                        }),
+                    .request_wire(
+                        wire_vm_ownership(&connection_id, &session_id, &vm_id),
+                        wire::RequestPayload::RegisterHostCallbacksRequest(
+                            wire::RegisterHostCallbacksRequest {
+                                name: kit.name.clone(),
+                                description: kit.description.clone(),
+                                command_aliases: vec![format!("agentos-{}", kit.name)],
+                                registry_command_aliases: vec![String::from("agentos")],
+                                callbacks: tools,
+                            },
+                        ),
                     )
                     .await?
                 {
-                    ResponsePayload::ToolkitRegistered(_) => {}
-                    ResponsePayload::Rejected(rejected) => return Err(rejected_to_error(rejected)),
-                    _ => {
+                    wire::ResponsePayload::HostCallbacksRegisteredResponse(_) => {}
+                    wire::ResponsePayload::RejectedResponse(rejected) => {
+                        return Err(rejected_to_error(rejected));
+                    }
+                    wire::ResponsePayload::AuthenticatedResponse(_)
+                    | wire::ResponsePayload::SessionOpenedResponse(_)
+                    | wire::ResponsePayload::VmCreatedResponse(_)
+                    | wire::ResponsePayload::VmDisposedResponse(_)
+                    | wire::ResponsePayload::RootFilesystemBootstrappedResponse(_)
+                    | wire::ResponsePayload::VmConfiguredResponse(_)
+                    | wire::ResponsePayload::LayerCreatedResponse(_)
+                    | wire::ResponsePayload::LayerSealedResponse(_)
+                    | wire::ResponsePayload::SnapshotImportedResponse(_)
+                    | wire::ResponsePayload::SnapshotExportedResponse(_)
+                    | wire::ResponsePayload::OverlayCreatedResponse(_)
+                    | wire::ResponsePayload::GuestFilesystemResultResponse(_)
+                    | wire::ResponsePayload::RootFilesystemSnapshotResponse(_)
+                    | wire::ResponsePayload::ProcessStartedResponse(_)
+                    | wire::ResponsePayload::StdinWrittenResponse(_)
+                    | wire::ResponsePayload::StdinClosedResponse(_)
+                    | wire::ResponsePayload::ProcessKilledResponse(_)
+                    | wire::ResponsePayload::ProcessSnapshotResponse(_)
+                    | wire::ResponsePayload::ListenerSnapshotResponse(_)
+                    | wire::ResponsePayload::BoundUdpSnapshotResponse(_)
+                    | wire::ResponsePayload::SignalStateResponse(_)
+                    | wire::ResponsePayload::ZombieTimerCountResponse(_)
+                    | wire::ResponsePayload::FilesystemResultResponse(_)
+                    | wire::ResponsePayload::PermissionDecisionResponse(_)
+                    | wire::ResponsePayload::PersistenceStateResponse(_)
+                    | wire::ResponsePayload::PersistenceFlushedResponse(_)
+                    | wire::ResponsePayload::VmFetchResponse(_)
+                    | wire::ResponsePayload::ExtEnvelope(_) => {
                         return Err(ClientError::Sidecar(
-                            "unexpected register_toolkit response".to_string(),
+                            "unexpected register_host_callbacks response".to_string(),
                         ));
                     }
                 }
             }
-            let _ = vm_tools().insert(vm_id.clone(), Arc::new(tool_map));
-            transport.register_callback("tool_invocation", tool_invocation_callback());
+            let _ = vm_tools().insert(
+                vm_id.clone(),
+                Arc::new(VmHostToolRegistry {
+                    tool_kits: config.tool_kits.clone(),
+                    tool_map,
+                    permissions: config.permissions.clone(),
+                }),
+            );
+            transport.register_wire_callback("host_callback", host_callback_callback());
         }
 
         // 7. Lease this VM on the (possibly shared) sidecar, build cron, and assemble the client.
@@ -383,16 +505,17 @@ impl AgentOs {
         let client = AgentOs {
             inner: Arc::new(inner),
         };
-        // Register the permission router and callback unconditionally (unlike `tool_invocation`,
+        // Register the permission router and callback unconditionally (unlike `host_callback`,
         // which is gated on configured tool kits): any agent session can raise a permission
         // request. Re-registering on a shared transport replaces an identical stateless callback,
-        // same as the `tool_invocation` pattern.
+        // same as the `host_callback` pattern.
         let _ = vm_permission_routers()
             .insert(client.inner.vm_id.clone(), Arc::downgrade(&client.inner));
         client
             .inner
             .transport
-            .register_callback("permission_request", permission_request_callback());
+            .register_wire_callback("ext", permission_request_callback());
+        spawn_acp_event_pump(&client);
         Ok(client)
     }
 
@@ -437,17 +560,17 @@ impl AgentOs {
             self.inner.acp_terminal_count.store(0, Ordering::SeqCst);
             for (process_id, _) in &terminal_entries {
                 let transport = self.transport().clone();
-                let ownership = OwnershipScope::vm(
-                    self.inner.connection_id.clone(),
-                    self.inner.session_id.clone(),
-                    self.inner.vm_id.clone(),
-                );
+                let ownership = wire::OwnershipScope::VmOwnership(wire::VmOwnership {
+                    connection_id: self.inner.connection_id.clone(),
+                    session_id: self.inner.session_id.clone(),
+                    vm_id: self.inner.vm_id.clone(),
+                });
                 let process_id = process_id.clone();
                 exit_tasks.push(tokio::spawn(async move {
                     let _ = transport
-                        .request(
+                        .request_wire(
                             ownership,
-                            RequestPayload::KillProcess(KillProcessRequest {
+                            wire::RequestPayload::KillProcessRequest(wire::KillProcessRequest {
                                 process_id,
                                 signal: String::from("SIGTERM"),
                             }),
@@ -480,14 +603,14 @@ impl AgentOs {
         let lease = self.inner.sidecar_lease.lock().take();
         let _ = self
             .transport()
-            .request(
-                OwnershipScope::vm(
-                    &self.inner.connection_id,
-                    &self.inner.session_id,
-                    &self.inner.vm_id,
-                ),
-                RequestPayload::DisposeVm(DisposeVmRequest {
-                    reason: DisposeReason::Requested,
+            .request_wire(
+                wire::OwnershipScope::VmOwnership(wire::VmOwnership {
+                    connection_id: self.inner.connection_id.clone(),
+                    session_id: self.inner.session_id.clone(),
+                    vm_id: self.inner.vm_id.clone(),
+                }),
+                wire::RequestPayload::DisposeVmRequest(wire::DisposeVmRequest {
+                    reason: wire::DisposeReason::Requested,
                 }),
             )
             .await;
@@ -542,19 +665,121 @@ impl AgentOs {
     }
 }
 
+fn spawn_acp_event_pump(client: &AgentOs) {
+    let mut events = client.transport().subscribe_wire_events();
+    let inner = Arc::downgrade(&client.inner);
+    tokio::spawn(async move {
+        loop {
+            match events.recv().await {
+                Ok((ownership, wire::EventPayload::ExtEnvelope(envelope))) => {
+                    let Some(inner) = inner.upgrade() else {
+                        break;
+                    };
+                    if inner.disposed.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    if wire_ownership_vm_id(&ownership) != Some(inner.vm_id.as_str()) {
+                        continue;
+                    }
+                    if let Err(error) = deliver_acp_ext_event(&inner, envelope) {
+                        tracing::warn!(?error, "failed to deliver acp extension event");
+                    }
+                }
+                Ok((
+                    _,
+                    wire::EventPayload::VmLifecycleEvent(_)
+                    | wire::EventPayload::ProcessOutputEvent(_)
+                    | wire::EventPayload::ProcessExitedEvent(_)
+                    | wire::EventPayload::StructuredEvent(_),
+                )) => {}
+                Err(broadcast::error::RecvError::Lagged(_)) => {}
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+}
+
+fn deliver_acp_ext_event(
+    inner: &AgentOsInner,
+    envelope: wire::ExtEnvelope,
+) -> Result<(), ClientError> {
+    if envelope.namespace != ACP_EXTENSION_NAMESPACE {
+        return Ok(());
+    }
+    let event: AcpEvent = serde_bare::from_slice(&envelope.payload)
+        .map_err(|error| ClientError::Sidecar(format!("invalid ACP event: {error}")))?;
+    match event {
+        AcpEvent::AcpSessionEvent(event) => {
+            let notification: JsonRpcNotification = serde_json::from_str(&event.notification)
+                .map_err(|error| {
+                    ClientError::Sidecar(format!("invalid ACP session notification: {error}"))
+                })?;
+            let delivered = inner
+                .sessions
+                .read(&event.session_id, |_, entry| {
+                    record_live_session_event(entry, notification.clone());
+                })
+                .is_some();
+            if !delivered {
+                tracing::warn!(
+                    session_id = event.session_id,
+                    "received acp event for unknown session"
+                );
+            }
+            Ok(())
+        }
+    }
+}
+
 /// Convert a sidecar's client-side placement into the wire `SidecarPlacement` for OpenSession.
-fn sidecar_wire_placement(sidecar: &AgentOsSidecar) -> SidecarPlacement {
+fn sidecar_wire_placement(sidecar: &AgentOsSidecar) -> wire::SidecarPlacement {
     match &sidecar.placement {
-        AgentOsSidecarPlacement::Shared { pool } => SidecarPlacement::Shared { pool: pool.clone() },
-        AgentOsSidecarPlacement::Explicit { sidecar_id } => SidecarPlacement::Explicit {
-            sidecar_id: sidecar_id.clone(),
-        },
+        AgentOsSidecarPlacement::Shared { pool } => {
+            wire::SidecarPlacement::SidecarPlacementShared(wire::SidecarPlacementShared {
+                pool: pool.clone(),
+            })
+        }
+        AgentOsSidecarPlacement::Explicit { sidecar_id } => {
+            wire::SidecarPlacement::SidecarPlacementExplicit(wire::SidecarPlacementExplicit {
+                sidecar_id: sidecar_id.clone(),
+            })
+        }
+    }
+}
+
+fn wire_connection_ownership(connection_id: &str) -> wire::OwnershipScope {
+    wire::OwnershipScope::ConnectionOwnership(wire::ConnectionOwnership {
+        connection_id: connection_id.to_string(),
+    })
+}
+
+fn wire_session_ownership(connection_id: &str, session_id: &str) -> wire::OwnershipScope {
+    wire::OwnershipScope::SessionOwnership(wire::SessionOwnership {
+        connection_id: connection_id.to_string(),
+        session_id: session_id.to_string(),
+    })
+}
+
+fn wire_vm_ownership(connection_id: &str, session_id: &str, vm_id: &str) -> wire::OwnershipScope {
+    wire::OwnershipScope::VmOwnership(wire::VmOwnership {
+        connection_id: connection_id.to_string(),
+        session_id: session_id.to_string(),
+        vm_id: vm_id.to_string(),
+    })
+}
+
+fn default_wire_root_filesystem() -> wire::RootFilesystemDescriptor {
+    wire::RootFilesystemDescriptor {
+        mode: wire::RootFilesystemMode::Ephemeral,
+        disable_default_base_layer: false,
+        lowers: Vec::new(),
+        bootstrap_entries: Vec::new(),
     }
 }
 
 /// Await the `ready` VM lifecycle event for `vm_id`, bounded by `timeout_ms`.
 async fn wait_for_vm_ready(
-    events: &mut broadcast::Receiver<(OwnershipScope, EventPayload)>,
+    events: &mut broadcast::Receiver<(wire::OwnershipScope, wire::EventPayload)>,
     vm_id: &str,
     timeout_ms: u64,
 ) -> Result<(), ClientError> {
@@ -562,16 +787,17 @@ async fn wait_for_vm_ready(
         loop {
             match events.recv().await {
                 Ok((ownership, payload)) => match payload {
-                    EventPayload::VmLifecycle(event) => {
-                        if matches!(event.state, VmLifecycleState::Ready)
-                            && ownership_vm_id(&ownership) == Some(vm_id)
+                    wire::EventPayload::VmLifecycleEvent(event) => {
+                        if matches!(event.state, wire::VmLifecycleState::Ready)
+                            && wire_ownership_vm_id(&ownership) == Some(vm_id)
                         {
                             return Ok(());
                         }
                     }
-                    EventPayload::ProcessOutput(_)
-                    | EventPayload::ProcessExited(_)
-                    | EventPayload::Structured(_) => {}
+                    wire::EventPayload::ProcessOutputEvent(_)
+                    | wire::EventPayload::ProcessExitedEvent(_)
+                    | wire::EventPayload::StructuredEvent(_)
+                    | wire::EventPayload::ExtEnvelope(_) => {}
                 },
                 Err(broadcast::error::RecvError::Lagged(_)) => {}
                 Err(broadcast::error::RecvError::Closed) => {
@@ -589,12 +815,18 @@ async fn wait_for_vm_ready(
         })?
 }
 
-/// Process-global per-VM host-tool registry (vm_id -> tools keyed by `<toolkit>:<tool>`). The shared
-/// transport's single tool-invocation callback routes to the right VM's tools by frame ownership.
-static VM_TOOLS: OnceCell<SccHashMap<String, Arc<std::collections::HashMap<String, HostTool>>>> =
-    OnceCell::new();
+/// Process-global per-VM host-tool registry. The shared transport's single host-callback routes to
+/// the right VM's toolkits by frame ownership.
+static VM_TOOLS: OnceCell<SccHashMap<String, Arc<VmHostToolRegistry>>> = OnceCell::new();
 
-fn vm_tools() -> &'static SccHashMap<String, Arc<std::collections::HashMap<String, HostTool>>> {
+#[derive(Clone)]
+struct VmHostToolRegistry {
+    tool_kits: Vec<ToolKit>,
+    tool_map: HashMap<String, HostTool>,
+    permissions: Option<Permissions>,
+}
+
+fn vm_tools() -> &'static SccHashMap<String, Arc<VmHostToolRegistry>> {
     VM_TOOLS.get_or_init(SccHashMap::new)
 }
 
@@ -609,114 +841,1267 @@ fn vm_permission_routers() -> &'static SccHashMap<String, Weak<AgentOsInner>> {
 
 /// The transport callback that answers sidecar permission requests by routing them to the owning
 /// client's `on_permission_request` subscribers. Mirrors TS `_handlePermissionSidecarRequest`.
-fn permission_request_callback() -> SidecarCallback {
+fn permission_request_callback() -> WireSidecarCallback {
     Arc::new(|payload, ownership| {
         Box::pin(async move {
-            let request = match payload {
-                SidecarRequestPayload::PermissionRequest(request) => request,
-                SidecarRequestPayload::ToolInvocation(_)
-                | SidecarRequestPayload::AcpRequest(_)
-                | SidecarRequestPayload::JsBridgeCall(_) => {
-                    return Ok(SidecarResponsePayload::PermissionRequestResult(
-                        SidecarPermissionResultResponse {
-                            permission_id: "unknown".to_string(),
-                            reply: None,
-                            error: Some(
-                                "permission callback received a non-permission request".to_string(),
-                            ),
-                        },
-                    ));
+            match payload {
+                wire::SidecarRequestPayload::ExtEnvelope(envelope) => {
+                    handle_acp_ext_callback(envelope, &ownership)
+                        .await
+                        .map_err(|error| TransportError::Sidecar(error.to_string()))
                 }
-            };
-            let vm_id = ownership_vm_id(&ownership).unwrap_or("");
-            let inner = vm_permission_routers()
-                .read(vm_id, |_, weak| weak.clone())
-                .and_then(|weak| weak.upgrade());
-            let Some(inner) = inner else {
-                return Ok(SidecarResponsePayload::PermissionRequestResult(
-                    SidecarPermissionResultResponse {
-                        permission_id: request.permission_id,
-                        reply: None,
-                        error: Some(format!("no client registered for vm: {vm_id}")),
-                    },
-                ));
-            };
-            let client = AgentOs { inner };
-            Ok(SidecarResponsePayload::PermissionRequestResult(
-                client.deliver_sidecar_permission_request(request).await,
-            ))
+                wire::SidecarRequestPayload::HostCallbackRequest(_)
+                | wire::SidecarRequestPayload::JsBridgeCallRequest(_) => Ok(
+                    wire::SidecarResponsePayload::ExtEnvelope(wire::ExtEnvelope {
+                        namespace: ACP_EXTENSION_NAMESPACE.to_string(),
+                        payload: b"permission callback received a non-extension request".to_vec(),
+                    }),
+                ),
+            }
         })
     })
 }
 
+async fn handle_acp_ext_callback(
+    envelope: wire::ExtEnvelope,
+    ownership: &wire::OwnershipScope,
+) -> Result<wire::SidecarResponsePayload, ClientError> {
+    if envelope.namespace != ACP_EXTENSION_NAMESPACE {
+        return Ok(wire::SidecarResponsePayload::ExtEnvelope(
+            wire::ExtEnvelope {
+                namespace: envelope.namespace,
+                payload: b"unknown extension namespace".to_vec(),
+            },
+        ));
+    }
+    let callback: AcpCallback = serde_bare::from_slice(&envelope.payload)
+        .map_err(|error| ClientError::Sidecar(format!("invalid ACP callback: {error}")))?;
+    let response = match callback {
+        AcpCallback::AcpPermissionCallback(callback) => {
+            let params =
+                serde_json::from_str(&callback.params).unwrap_or_else(|_| serde_json::json!({}));
+            let result = route_permission_request(
+                ownership,
+                PermissionRouteRequest {
+                    session_id: callback.session_id,
+                    permission_id: callback.permission_id.clone(),
+                    params,
+                },
+            )
+            .await;
+            let reply = result.reply.unwrap_or_else(|| String::from("reject"));
+            AcpCallbackResponse::AcpPermissionCallbackResponse(AcpPermissionCallbackResponse {
+                permission_id: callback.permission_id,
+                reply,
+            })
+        }
+        AcpCallback::AcpHostRequestCallback(callback) => {
+            let response = serde_json::from_str::<serde_json::Value>(&callback.request)
+                .ok()
+                .and_then(|request| {
+                    let id = request
+                        .get("id")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null);
+                    let method = request
+                        .get("method")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("unknown");
+                    serde_json::to_string(&serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "error": {
+                            "code": -32601,
+                            "message": format!("Method not found: {method}"),
+                            "data": { "method": method },
+                        },
+                    }))
+                    .ok()
+                });
+            AcpCallbackResponse::AcpHostRequestCallbackResponse(AcpHostRequestCallbackResponse {
+                response,
+            })
+        }
+    };
+    let payload = serde_bare::to_vec(&response).map_err(|error| {
+        ClientError::Sidecar(format!("failed to encode ACP callback response: {error}"))
+    })?;
+    Ok(wire::SidecarResponsePayload::ExtEnvelope(
+        wire::ExtEnvelope {
+            namespace: ACP_EXTENSION_NAMESPACE.to_string(),
+            payload,
+        },
+    ))
+}
+
+async fn route_permission_request(
+    ownership: &wire::OwnershipScope,
+    request: PermissionRouteRequest,
+) -> PermissionRouteResult {
+    let vm_id = wire_ownership_vm_id(ownership).unwrap_or("");
+    let inner = vm_permission_routers()
+        .read(vm_id, |_, weak| weak.clone())
+        .and_then(|weak| weak.upgrade());
+    let Some(inner) = inner else {
+        return PermissionRouteResult { reply: None };
+    };
+    let client = AgentOs { inner };
+    client.deliver_sidecar_permission_request(request).await
+}
+
 /// The transport callback that answers guest tool invocations by running the matching host tool.
-fn tool_invocation_callback() -> SidecarCallback {
+fn host_callback_callback() -> WireSidecarCallback {
     Arc::new(|payload, ownership| {
         Box::pin(async move {
             let request = match payload {
-                SidecarRequestPayload::ToolInvocation(request) => request,
-                _ => {
-                    return Ok(SidecarResponsePayload::ToolInvocationResult(
-                        ToolInvocationResultResponse {
+                wire::SidecarRequestPayload::HostCallbackRequest(request) => request,
+                wire::SidecarRequestPayload::JsBridgeCallRequest(_) => {
+                    return Ok(wire::SidecarResponsePayload::HostCallbackResultResponse(
+                        wire::HostCallbackResultResponse {
                             invocation_id: "unknown".to_string(),
                             result: None,
-                            error: Some(
-                                "tool-invocation callback received a non-tool request".to_string(),
-                            ),
+                            error: Some("host-callback received a non-tool request".to_string()),
+                        },
+                    ));
+                }
+                wire::SidecarRequestPayload::ExtEnvelope(envelope) => {
+                    return Ok(wire::SidecarResponsePayload::ExtEnvelope(
+                        wire::ExtEnvelope {
+                            namespace: envelope.namespace,
+                            payload: b"host-callback received an extension request".to_vec(),
                         },
                     ));
                 }
             };
-            Ok(SidecarResponsePayload::ToolInvocationResult(
-                run_tool_invocation(&ownership, request).await,
+            Ok(wire::SidecarResponsePayload::HostCallbackResultResponse(
+                run_host_callback(&ownership, request).await,
             ))
         })
     })
 }
 
 /// Run a single tool invocation against the per-VM host-tool registry, honoring the timeout. Mirrors
-/// TS `handleToolInvocation` (unknown-tool + timeout + error shapes).
-async fn run_tool_invocation(
-    ownership: &OwnershipScope,
-    request: ToolInvocationRequest,
-) -> ToolInvocationResultResponse {
-    let vm_id = ownership_vm_id(ownership).unwrap_or("");
-    let tool = vm_tools()
-        .read(vm_id, |_, map| map.clone())
-        .and_then(|map| map.get(&request.tool_key).cloned());
-    let Some(tool) = tool else {
-        return ToolInvocationResultResponse {
+/// TS `handleHostCallback` (unknown-tool + timeout + error shapes).
+async fn run_host_callback(
+    ownership: &wire::OwnershipScope,
+    request: wire::HostCallbackRequest,
+) -> wire::HostCallbackResultResponse {
+    let input = match serde_json::from_str::<Value>(&request.input) {
+        Ok(input) => input,
+        Err(error) => {
+            return wire::HostCallbackResultResponse {
+                invocation_id: request.invocation_id,
+                result: None,
+                error: Some(format!("Invalid host callback input: {error}")),
+            };
+        }
+    };
+    let vm_id = wire_ownership_vm_id(ownership).unwrap_or("");
+    let registry = vm_tools().read(vm_id, |_, registry| registry.clone());
+    let Some(registry) = registry else {
+        return wire::HostCallbackResultResponse {
             invocation_id: request.invocation_id,
             result: None,
-            error: Some(format!("Unknown tool \"{}\"", request.tool_key)),
+            error: Some(format!("Unknown tool \"{}\"", request.callback_key)),
+        };
+    };
+
+    if let Some(command) = parse_host_command_callback_input(&input) {
+        return match run_host_command_callback(ownership, registry.as_ref(), command).await {
+            Ok(value) => match host_callback_json_result(value) {
+                Ok(result) => wire::HostCallbackResultResponse {
+                    invocation_id: request.invocation_id,
+                    result: Some(result),
+                    error: None,
+                },
+                Err(error) => wire::HostCallbackResultResponse {
+                    invocation_id: request.invocation_id,
+                    result: None,
+                    error: Some(error),
+                },
+            },
+            Err(error) => wire::HostCallbackResultResponse {
+                invocation_id: request.invocation_id,
+                result: None,
+                error: Some(error),
+            },
+        };
+    }
+
+    let tool = registry.tool_map.get(&request.callback_key).cloned();
+    let Some(tool) = tool else {
+        return wire::HostCallbackResultResponse {
+            invocation_id: request.invocation_id,
+            result: None,
+            error: Some(format!("Unknown tool \"{}\"", request.callback_key)),
         };
     };
     let timeout = Duration::from_millis(request.timeout_ms.max(1));
-    match tokio::time::timeout(timeout, (tool.execute)(request.input)).await {
-        Ok(Ok(value)) => ToolInvocationResultResponse {
-            invocation_id: request.invocation_id,
-            result: Some(value),
-            error: None,
+    match tokio::time::timeout(timeout, (tool.execute)(input)).await {
+        Ok(Ok(value)) => match host_callback_json_result(value) {
+            Ok(result) => wire::HostCallbackResultResponse {
+                invocation_id: request.invocation_id,
+                result: Some(result),
+                error: None,
+            },
+            Err(error) => wire::HostCallbackResultResponse {
+                invocation_id: request.invocation_id,
+                result: None,
+                error: Some(error),
+            },
         },
-        Ok(Err(error)) => ToolInvocationResultResponse {
+        Ok(Err(error)) => wire::HostCallbackResultResponse {
             invocation_id: request.invocation_id,
             result: None,
             error: Some(error),
         },
-        Err(_) => ToolInvocationResultResponse {
+        Err(_) => wire::HostCallbackResultResponse {
             invocation_id: request.invocation_id,
             result: None,
             error: Some(format!(
                 "Tool \"{}\" timed out after {}ms",
-                request.tool_key, request.timeout_ms
+                request.callback_key, request.timeout_ms
             )),
         },
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct HostCommandCallbackInput {
+    #[serde(rename = "type")]
+    kind: String,
+    command: String,
+    #[serde(default)]
+    args: Vec<String>,
+    cwd: String,
+}
+
+fn parse_host_command_callback_input(input: &Value) -> Option<HostCommandCallbackInput> {
+    let command = serde_json::from_value::<HostCommandCallbackInput>(input.clone()).ok()?;
+    if command.kind == "command" {
+        Some(command)
+    } else {
+        None
+    }
+}
+
+async fn run_host_command_callback(
+    ownership: &wire::OwnershipScope,
+    registry: &VmHostToolRegistry,
+    command: HostCommandCallbackInput,
+) -> Result<Value, String> {
+    if command.command == "agentos" {
+        return handle_agentos_registry_command(ownership, registry, &command).await;
+    }
+    let Some(toolkit) = registry
+        .tool_kits
+        .iter()
+        .find(|toolkit| format!("agentos-{}", toolkit.name) == command.command)
+    else {
+        return Err(format!(
+            "Unknown host callback command \"{}\"",
+            command.command
+        ));
+    };
+    handle_agentos_toolkit_command(ownership, registry, &command, toolkit).await
+}
+
+async fn handle_agentos_registry_command(
+    ownership: &wire::OwnershipScope,
+    registry: &VmHostToolRegistry,
+    command: &HostCommandCallbackInput,
+) -> Result<Value, String> {
+    let Some(subcommand) = command.args.first() else {
+        return Ok(json_object([(
+            "usage",
+            Value::String(String::from(
+                "agentos <command>: list-tools [toolkit], <toolkit> --help, or <toolkit> <tool> ...",
+            )),
+        )]));
+    };
+    if is_help_flag(subcommand) {
+        return Ok(json_object([(
+            "usage",
+            Value::String(String::from(
+                "agentos <command>: list-tools [toolkit], <toolkit> --help, or <toolkit> <tool> ...",
+            )),
+        )]));
+    }
+    if subcommand == "list-tools" {
+        return match command.args.get(1) {
+            Some(toolkit_name) => describe_toolkit_payload(&registry.tool_kits, toolkit_name),
+            None => Ok(list_toolkits_payload(&registry.tool_kits)),
+        };
+    }
+
+    let Some(toolkit) = registry
+        .tool_kits
+        .iter()
+        .find(|toolkit| toolkit.name == *subcommand)
+    else {
+        return Err(format!(
+            "No toolkit \"{subcommand}\". Available: {}",
+            toolkit_names(&registry.tool_kits)
+        ));
+    };
+
+    let Some(tool_name) = command.args.get(1) else {
+        return describe_toolkit_payload(&registry.tool_kits, subcommand);
+    };
+    if is_help_flag(tool_name) {
+        return describe_toolkit_payload(&registry.tool_kits, subcommand);
+    }
+    if command.args.get(2).is_some_and(|value| is_help_flag(value)) {
+        return describe_tool_payload(toolkit, tool_name);
+    }
+    invoke_host_tool(
+        ownership,
+        registry,
+        toolkit,
+        tool_name,
+        command.args.get(2..).unwrap_or_default(),
+        &command.cwd,
+    )
+    .await
+}
+
+async fn handle_agentos_toolkit_command(
+    ownership: &wire::OwnershipScope,
+    registry: &VmHostToolRegistry,
+    command: &HostCommandCallbackInput,
+    toolkit: &ToolKit,
+) -> Result<Value, String> {
+    let Some(tool_name) = command.args.first() else {
+        return describe_toolkit_payload(&registry.tool_kits, &toolkit.name);
+    };
+    if is_help_flag(tool_name) {
+        return describe_toolkit_payload(&registry.tool_kits, &toolkit.name);
+    }
+    if command.args.get(1).is_some_and(|value| is_help_flag(value)) {
+        return describe_tool_payload(toolkit, tool_name);
+    }
+    invoke_host_tool(
+        ownership,
+        registry,
+        toolkit,
+        tool_name,
+        command.args.get(1..).unwrap_or_default(),
+        &command.cwd,
+    )
+    .await
+}
+
+async fn invoke_host_tool(
+    ownership: &wire::OwnershipScope,
+    registry: &VmHostToolRegistry,
+    toolkit: &ToolKit,
+    tool_name: &str,
+    args: &[String],
+    cwd: &str,
+) -> Result<Value, String> {
+    let callback_key = format!("{}:{tool_name}", toolkit.name);
+    let Some(tool) = registry.tool_map.get(&callback_key).cloned() else {
+        return Err(format!(
+            "No tool \"{tool_name}\" in toolkit \"{}\". Available: {}",
+            toolkit.name,
+            tool_names(toolkit)
+        ));
+    };
+
+    if tool_permission_mode(registry.permissions.as_ref(), &callback_key) != PermissionMode::Allow {
+        return Err(format!(
+            "EACCES: blocked by tool.invoke policy for {callback_key}"
+        ));
+    }
+
+    let input = parse_host_tool_input(ownership, &tool, args, cwd).await?;
+    validate_tool_input(&tool.input_schema, &input).map_err(|error| error.to_string())?;
+
+    let timeout = Duration::from_millis(tool.timeout_ms.unwrap_or(30_000).max(1));
+    match tokio::time::timeout(timeout, (tool.execute)(input)).await {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(error)) => Err(error),
+        Err(_) => Err(format!(
+            "Tool \"{callback_key}\" timed out after {}ms",
+            tool.timeout_ms.unwrap_or(30_000)
+        )),
+    }
+}
+
+async fn parse_host_tool_input(
+    ownership: &wire::OwnershipScope,
+    tool: &HostTool,
+    args: &[String],
+    cwd: &str,
+) -> Result<Value, String> {
+    if args.first().is_some_and(|arg| arg == "--json") {
+        let value = args
+            .get(1)
+            .ok_or_else(|| String::from("Flag --json requires a value"))?;
+        return serde_json::from_str(value)
+            .map_err(|error| format!("Invalid JSON for --json: {error}"));
+    }
+
+    if args.first().is_some_and(|arg| arg == "--json-file") {
+        let path = args
+            .get(1)
+            .ok_or_else(|| String::from("Flag --json-file requires a value"))?;
+        let guest_path = normalize_guest_path(if path.starts_with('/') {
+            path.clone()
+        } else {
+            format!("{cwd}/{path}")
+        });
+        let vm_id = wire_ownership_vm_id(ownership).unwrap_or("");
+        let inner = vm_permission_routers()
+            .read(vm_id, |_, weak| weak.clone())
+            .and_then(|weak| weak.upgrade())
+            .ok_or_else(|| String::from("Invalid JSON file: VM is no longer available"))?;
+        let bytes = AgentOs { inner }
+            .read_file(&guest_path)
+            .await
+            .map_err(|error| format!("Invalid JSON file: {error}"))?;
+        let text =
+            String::from_utf8(bytes).map_err(|error| format!("Invalid JSON file: {error}"))?;
+        return serde_json::from_str(&text).map_err(|error| format!("Invalid JSON file: {error}"));
+    }
+
+    parse_tool_argv(&tool.input_schema, args)
+}
+
+fn host_callback_json_result(value: Value) -> Result<String, String> {
+    serde_json::to_string(&value).map_err(|error| format!("Invalid host callback result: {error}"))
+}
+
+fn parse_tool_argv(schema: &Value, argv: &[String]) -> Result<Value, String> {
+    let properties = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let required = schema
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect::<std::collections::BTreeSet<_>>()
+        })
+        .unwrap_or_default();
+
+    let mut flag_to_field = BTreeMap::new();
+    for (field_name, field_schema) in &properties {
+        flag_to_field.insert(
+            camel_to_kebab(field_name),
+            (field_name.clone(), field_schema.clone()),
+        );
+    }
+
+    let mut input = Map::new();
+    let mut index = 0;
+    while index < argv.len() {
+        let arg = &argv[index];
+        if !arg.starts_with("--") {
+            return Err(format!("Unexpected positional argument: \"{arg}\""));
+        }
+
+        let raw_flag = &arg[2..];
+        let (flag_name, negated) = raw_flag
+            .strip_prefix("no-")
+            .map(|name| (name, true))
+            .unwrap_or((raw_flag, false));
+        let Some((field_name, field_schema)) = flag_to_field.get(flag_name) else {
+            return Err(format!("Unknown flag: --{raw_flag}"));
+        };
+        let field_type = json_schema_type(field_schema);
+
+        if negated {
+            if field_type != Some("boolean") {
+                return Err(format!("Unknown flag: --{raw_flag}"));
+            }
+            input.insert(field_name.clone(), Value::Bool(false));
+            index += 1;
+            continue;
+        }
+
+        match field_type {
+            Some("boolean") => {
+                input.insert(field_name.clone(), Value::Bool(true));
+                index += 1;
+            }
+            Some("number") | Some("integer") => {
+                let value = argv
+                    .get(index + 1)
+                    .ok_or_else(|| format!("Flag --{raw_flag} requires a value"))?;
+                let number = value
+                    .parse::<f64>()
+                    .map_err(|_| format!("Flag --{raw_flag} expects a number, got \"{value}\""))?;
+                let number = serde_json::Number::from_f64(number).ok_or_else(|| {
+                    format!("Flag --{raw_flag} expects a finite number, got \"{value}\"")
+                })?;
+                input.insert(field_name.clone(), Value::Number(number));
+                index += 2;
+            }
+            Some("array") => {
+                let value = argv
+                    .get(index + 1)
+                    .ok_or_else(|| format!("Flag --{raw_flag} requires a value"))?;
+                let item_type = field_schema.get("items").and_then(json_schema_type);
+                let parsed_value = match item_type {
+                    Some("number") | Some("integer") => {
+                        let number = value.parse::<f64>().map_err(|_| {
+                            format!("Flag --{raw_flag} expects a number value, got \"{value}\"")
+                        })?;
+                        let number = serde_json::Number::from_f64(number).ok_or_else(|| {
+                            format!(
+                                "Flag --{raw_flag} expects a finite number value, got \"{value}\""
+                            )
+                        })?;
+                        Value::Number(number)
+                    }
+                    Some("boolean") => {
+                        let boolean = value.parse::<bool>().map_err(|_| {
+                            format!("Flag --{raw_flag} expects a boolean value, got \"{value}\"")
+                        })?;
+                        Value::Bool(boolean)
+                    }
+                    _ => Value::String(value.clone()),
+                };
+                input
+                    .entry(field_name.clone())
+                    .or_insert_with(|| Value::Array(Vec::new()))
+                    .as_array_mut()
+                    .expect("array field should always contain an array")
+                    .push(parsed_value);
+                index += 2;
+            }
+            _ => {
+                let value = argv
+                    .get(index + 1)
+                    .ok_or_else(|| format!("Flag --{raw_flag} requires a value"))?;
+                input.insert(field_name.clone(), Value::String(value.clone()));
+                index += 2;
+            }
+        }
+    }
+
+    for field_name in required {
+        if !input.contains_key(&field_name) {
+            return Err(format!(
+                "Missing required flag: --{}",
+                camel_to_kebab(&field_name)
+            ));
+        }
+    }
+
+    Ok(Value::Object(input))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ToolInputSchemaViolation {
+    path: String,
+    expected: String,
+    actual: String,
+}
+
+impl ToolInputSchemaViolation {
+    fn new(
+        path: impl Into<String>,
+        expected: impl Into<String>,
+        actual: impl Into<String>,
+    ) -> Self {
+        Self {
+            path: path.into(),
+            expected: expected.into(),
+            actual: actual.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for ToolInputSchemaViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "ToolInputSchemaViolation at {}: expected {}, got {}",
+            self.path, self.expected, self.actual
+        )
+    }
+}
+
+fn validate_tool_input(schema: &Value, input: &Value) -> Result<(), ToolInputSchemaViolation> {
+    validate_tool_input_at_path(schema, input, "$")
+}
+
+fn validate_tool_input_at_path(
+    schema: &Value,
+    input: &Value,
+    path: &str,
+) -> Result<(), ToolInputSchemaViolation> {
+    if schema.is_null() || schema.as_object().is_some_and(|object| object.is_empty()) {
+        return Ok(());
+    }
+    if let Some(branches) = schema.get("anyOf").and_then(Value::as_array) {
+        return validate_schema_branches(branches, input, path, "anyOf");
+    }
+    if let Some(branches) = schema.get("oneOf").and_then(Value::as_array) {
+        return validate_schema_branches(branches, input, path, "oneOf");
+    }
+    if let Some(enum_values) = schema.get("enum").and_then(Value::as_array) {
+        if enum_values.iter().any(|candidate| candidate == input) {
+            return Ok(());
+        }
+        return Err(ToolInputSchemaViolation::new(
+            path,
+            format!(
+                "one of {}",
+                enum_values
+                    .iter()
+                    .map(compact_json)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            describe_value(input),
+        ));
+    }
+    if let Some(expected) = schema.get("const") {
+        if expected == input {
+            return Ok(());
+        }
+        return Err(ToolInputSchemaViolation::new(
+            path,
+            format!("constant {}", compact_json(expected)),
+            describe_value(input),
+        ));
+    }
+
+    match schema.get("type") {
+        Some(Value::String(expected_type)) => {
+            validate_typed_tool_input(schema, input, path, expected_type)
+        }
+        Some(Value::Array(expected_types)) => {
+            let mut first_error = None;
+            for expected_type in expected_types.iter().filter_map(Value::as_str) {
+                match validate_typed_tool_input(schema, input, path, expected_type) {
+                    Ok(()) => return Ok(()),
+                    Err(error) if first_error.is_none() => first_error = Some(error),
+                    Err(_) => {}
+                }
+            }
+            Err(first_error.unwrap_or_else(|| {
+                ToolInputSchemaViolation::new(
+                    path,
+                    describe_expected(schema),
+                    describe_value(input),
+                )
+            }))
+        }
+        Some(_) => Ok(()),
+        None if has_object_keywords(schema) => {
+            validate_typed_tool_input(schema, input, path, "object")
+        }
+        None => Ok(()),
+    }
+}
+
+fn validate_schema_branches(
+    branches: &[Value],
+    input: &Value,
+    path: &str,
+    keyword: &str,
+) -> Result<(), ToolInputSchemaViolation> {
+    let mut first_error = None;
+    for branch in branches {
+        match validate_tool_input_at_path(branch, input, path) {
+            Ok(()) => return Ok(()),
+            Err(error) if first_error.is_none() => first_error = Some(error),
+            Err(_) => {}
+        }
+    }
+    Err(first_error.unwrap_or_else(|| {
+        ToolInputSchemaViolation::new(
+            path,
+            format!(
+                "{keyword} branch ({})",
+                branches
+                    .iter()
+                    .map(describe_expected)
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            ),
+            describe_value(input),
+        )
+    }))
+}
+
+fn validate_typed_tool_input(
+    schema: &Value,
+    input: &Value,
+    path: &str,
+    expected_type: &str,
+) -> Result<(), ToolInputSchemaViolation> {
+    match expected_type {
+        "null" if input.is_null() => Ok(()),
+        "null" => Err(type_violation(path, expected_type, input)),
+        "boolean" if input.is_boolean() => Ok(()),
+        "boolean" => Err(type_violation(path, expected_type, input)),
+        "string" => validate_string_tool_input(schema, input, path),
+        "number" => validate_number_tool_input(schema, input, path, false),
+        "integer" => validate_number_tool_input(schema, input, path, true),
+        "array" => validate_array_tool_input(schema, input, path),
+        "object" => validate_object_tool_input(schema, input, path),
+        _ => Ok(()),
+    }
+}
+
+fn validate_string_tool_input(
+    schema: &Value,
+    input: &Value,
+    path: &str,
+) -> Result<(), ToolInputSchemaViolation> {
+    let Some(value) = input.as_str() else {
+        return Err(type_violation(path, "string", input));
+    };
+    if let Some(min_length) = schema.get("minLength").and_then(Value::as_u64) {
+        if value.chars().count() < min_length as usize {
+            return Err(ToolInputSchemaViolation::new(
+                path,
+                format!("string with minLength {min_length}"),
+                format!("string length {}", value.chars().count()),
+            ));
+        }
+    }
+    if let Some(max_length) = schema.get("maxLength").and_then(Value::as_u64) {
+        if value.chars().count() > max_length as usize {
+            return Err(ToolInputSchemaViolation::new(
+                path,
+                format!("string with maxLength {max_length}"),
+                format!("string length {}", value.chars().count()),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_number_tool_input(
+    schema: &Value,
+    input: &Value,
+    path: &str,
+    expect_integer: bool,
+) -> Result<(), ToolInputSchemaViolation> {
+    let Some(number) = input.as_f64() else {
+        return Err(type_violation(
+            path,
+            if expect_integer { "integer" } else { "number" },
+            input,
+        ));
+    };
+    if expect_integer && number.fract() != 0.0 {
+        return Err(type_violation(path, "integer", input));
+    }
+    if let Some(minimum) = schema.get("minimum").and_then(Value::as_f64) {
+        if number < minimum {
+            return Err(ToolInputSchemaViolation::new(
+                path,
+                format!(
+                    "{} >= {}",
+                    if expect_integer { "integer" } else { "number" },
+                    minimum
+                ),
+                compact_json(input),
+            ));
+        }
+    }
+    if let Some(minimum) = schema.get("exclusiveMinimum").and_then(Value::as_f64) {
+        if number <= minimum {
+            return Err(ToolInputSchemaViolation::new(
+                path,
+                format!(
+                    "{} > {}",
+                    if expect_integer { "integer" } else { "number" },
+                    minimum
+                ),
+                compact_json(input),
+            ));
+        }
+    }
+    if let Some(maximum) = schema.get("maximum").and_then(Value::as_f64) {
+        if number > maximum {
+            return Err(ToolInputSchemaViolation::new(
+                path,
+                format!(
+                    "{} <= {}",
+                    if expect_integer { "integer" } else { "number" },
+                    maximum
+                ),
+                compact_json(input),
+            ));
+        }
+    }
+    if let Some(maximum) = schema.get("exclusiveMaximum").and_then(Value::as_f64) {
+        if number >= maximum {
+            return Err(ToolInputSchemaViolation::new(
+                path,
+                format!(
+                    "{} < {}",
+                    if expect_integer { "integer" } else { "number" },
+                    maximum
+                ),
+                compact_json(input),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_array_tool_input(
+    schema: &Value,
+    input: &Value,
+    path: &str,
+) -> Result<(), ToolInputSchemaViolation> {
+    let Some(items) = input.as_array() else {
+        return Err(type_violation(path, "array", input));
+    };
+    if let Some(min_items) = schema.get("minItems").and_then(Value::as_u64) {
+        if items.len() < min_items as usize {
+            return Err(ToolInputSchemaViolation::new(
+                path,
+                format!("array with minItems {min_items}"),
+                format!("array length {}", items.len()),
+            ));
+        }
+    }
+    if let Some(max_items) = schema.get("maxItems").and_then(Value::as_u64) {
+        if items.len() > max_items as usize {
+            return Err(ToolInputSchemaViolation::new(
+                path,
+                format!("array with maxItems {max_items}"),
+                format!("array length {}", items.len()),
+            ));
+        }
+    }
+    if let Some(item_schema) = schema.get("items") {
+        for (index, item) in items.iter().enumerate() {
+            validate_tool_input_at_path(item_schema, item, &format!("{path}[{index}]"))?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_object_tool_input(
+    schema: &Value,
+    input: &Value,
+    path: &str,
+) -> Result<(), ToolInputSchemaViolation> {
+    let Some(object) = input.as_object() else {
+        return Err(type_violation(path, "object", input));
+    };
+    let properties = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let required = schema
+        .get("required")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    for field in required.iter().filter_map(Value::as_str) {
+        if !object.contains_key(field) {
+            let field_path = format!("{path}.{field}");
+            let expected = properties
+                .get(field)
+                .map(describe_expected)
+                .unwrap_or_else(|| String::from("required value"));
+            return Err(ToolInputSchemaViolation::new(
+                field_path,
+                expected,
+                "missing value",
+            ));
+        }
+    }
+    for (field, value) in object {
+        let field_path = format!("{path}.{field}");
+        if let Some(field_schema) = properties.get(field) {
+            validate_tool_input_at_path(field_schema, value, &field_path)?;
+            continue;
+        }
+        match schema.get("additionalProperties") {
+            Some(Value::Bool(false)) => {
+                return Err(ToolInputSchemaViolation::new(
+                    field_path,
+                    "no additional properties",
+                    describe_value(value),
+                ));
+            }
+            Some(additional_schema) => {
+                validate_tool_input_at_path(additional_schema, value, &field_path)?;
+            }
+            None => {}
+        }
+    }
+    Ok(())
+}
+
+fn has_object_keywords(schema: &Value) -> bool {
+    schema.get("properties").is_some()
+        || schema.get("required").is_some()
+        || schema.get("additionalProperties").is_some()
+}
+
+fn type_violation(path: &str, expected: &str, input: &Value) -> ToolInputSchemaViolation {
+    ToolInputSchemaViolation::new(path, expected, describe_value(input))
+}
+
+fn describe_expected(schema: &Value) -> String {
+    if let Some(enum_values) = schema.get("enum").and_then(Value::as_array) {
+        return format!(
+            "one of {}",
+            enum_values
+                .iter()
+                .map(compact_json)
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    if let Some(expected) = schema.get("const") {
+        return format!("constant {}", compact_json(expected));
+    }
+    match schema.get("type") {
+        Some(Value::String(expected_type)) => expected_type.clone(),
+        Some(Value::Array(expected_types)) => expected_types
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join(" | "),
+        _ if has_object_keywords(schema) => String::from("object"),
+        _ => String::from("value"),
+    }
+}
+
+fn describe_value(value: &Value) -> String {
+    match value {
+        Value::Null => String::from("null"),
+        Value::Bool(_) => String::from("boolean"),
+        Value::Number(number) => {
+            let is_integer = number.as_i64().is_some()
+                || number.as_u64().is_some()
+                || number.as_f64().is_some_and(|float| float.fract() == 0.0);
+            if is_integer {
+                String::from("integer")
+            } else {
+                String::from("number")
+            }
+        }
+        Value::String(_) => String::from("string"),
+        Value::Array(_) => String::from("array"),
+        Value::Object(_) => String::from("object"),
+    }
+}
+
+fn compact_json(value: &Value) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| String::from("<invalid json>"))
+}
+
+fn list_toolkits_payload(tool_kits: &[ToolKit]) -> Value {
+    Value::Object(Map::from_iter([(
+        String::from("toolkits"),
+        Value::Array(
+            tool_kits
+                .iter()
+                .map(|toolkit| {
+                    json_object([
+                        ("name", Value::String(toolkit.name.clone())),
+                        ("description", Value::String(toolkit.description.clone())),
+                        (
+                            "tools",
+                            Value::Array(
+                                toolkit
+                                    .tools
+                                    .iter()
+                                    .map(|tool| Value::String(tool.name.clone()))
+                                    .collect(),
+                            ),
+                        ),
+                    ])
+                })
+                .collect(),
+        ),
+    )]))
+}
+
+fn describe_toolkit_payload(tool_kits: &[ToolKit], toolkit_name: &str) -> Result<Value, String> {
+    let Some(toolkit) = tool_kits
+        .iter()
+        .find(|toolkit| toolkit.name == toolkit_name)
+    else {
+        return Err(format!(
+            "No toolkit \"{toolkit_name}\". Available: {}",
+            toolkit_names(tool_kits)
+        ));
+    };
+    Ok(json_object([
+        ("name", Value::String(toolkit.name.clone())),
+        ("description", Value::String(toolkit.description.clone())),
+        (
+            "tools",
+            Value::Object(Map::from_iter(toolkit.tools.iter().map(|tool| {
+                (
+                    tool.name.clone(),
+                    json_object([
+                        ("description", Value::String(tool.description.clone())),
+                        (
+                            "flags",
+                            Value::Array(describe_tool_flags(&tool.input_schema)),
+                        ),
+                    ]),
+                )
+            }))),
+        ),
+    ]))
+}
+
+fn describe_tool_payload(toolkit: &ToolKit, tool_name: &str) -> Result<Value, String> {
+    let Some(tool) = toolkit.tools.iter().find(|tool| tool.name == tool_name) else {
+        return Err(format!(
+            "No tool \"{tool_name}\" in toolkit \"{}\". Available: {}",
+            toolkit.name,
+            tool_names(toolkit)
+        ));
+    };
+    Ok(json_object([
+        ("toolkit", Value::String(toolkit.name.clone())),
+        ("tool", Value::String(tool_name.to_string())),
+        ("description", Value::String(tool.description.clone())),
+        (
+            "flags",
+            Value::Array(describe_tool_flags(&tool.input_schema)),
+        ),
+        ("examples", Value::Array(Vec::new())),
+    ]))
+}
+
+fn describe_tool_flags(schema: &Value) -> Vec<Value> {
+    let properties = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let required = schema
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect::<std::collections::BTreeSet<_>>()
+        })
+        .unwrap_or_default();
+    properties
+        .into_iter()
+        .map(|(field_name, field_schema)| {
+            json_object([
+                (
+                    "name",
+                    Value::String(format!("--{}", camel_to_kebab(&field_name))),
+                ),
+                (
+                    "type",
+                    Value::String(describe_tool_flag_type(&field_schema)),
+                ),
+                ("required", Value::Bool(required.contains(&field_name))),
+            ])
+        })
+        .collect()
+}
+
+fn describe_tool_flag_type(schema: &Value) -> String {
+    match json_schema_type(schema) {
+        Some("array") => {
+            let item_type = schema
+                .get("items")
+                .and_then(json_schema_type)
+                .unwrap_or("string");
+            format!("{item_type}[]")
+        }
+        Some("string") => schema
+            .get("enum")
+            .and_then(Value::as_array)
+            .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>())
+            .filter(|values| !values.is_empty())
+            .map(|values| values.join("|"))
+            .unwrap_or_else(|| String::from("string")),
+        Some(other) => other.to_string(),
+        None => String::from("string"),
+    }
+}
+
+fn tool_permission_mode(permissions: Option<&Permissions>, callback_key: &str) -> PermissionMode {
+    let Some(permissions) = permissions else {
+        return PermissionMode::Allow;
+    };
+    let Some(scope) = permissions.tool.as_ref() else {
+        return PermissionMode::Allow;
+    };
+    match scope {
+        crate::config::PatternPermissions::Mode(mode) => *mode,
+        crate::config::PatternPermissions::Rules(rules) => {
+            let mut mode = rules.default.unwrap_or(PermissionMode::Deny);
+            for rule in &rules.rules {
+                let operations_match = rule
+                    .operations
+                    .as_ref()
+                    .map(|operations| {
+                        operations
+                            .iter()
+                            .any(|operation| operation == "*" || operation == "invoke")
+                    })
+                    .unwrap_or(true);
+                let patterns_match = rule
+                    .patterns
+                    .as_ref()
+                    .map(|patterns| {
+                        patterns
+                            .iter()
+                            .any(|pattern| permission_pattern_matches(pattern, callback_key))
+                    })
+                    .unwrap_or(true);
+                if operations_match && patterns_match {
+                    mode = rule.mode;
+                }
+            }
+            mode
+        }
+    }
+}
+
+fn permission_pattern_matches(pattern: &str, value: &str) -> bool {
+    if pattern == "*" || pattern == "**" || pattern == value {
+        return true;
+    }
+    let mut pattern_index = 0;
+    let mut value_index = 0;
+    let pattern_bytes = pattern.as_bytes();
+    let value_bytes = value.as_bytes();
+    let mut star_index = None;
+    let mut match_index = 0;
+    while value_index < value_bytes.len() {
+        if pattern_index < pattern_bytes.len()
+            && pattern_bytes[pattern_index] == b'*'
+            && pattern_index + 1 < pattern_bytes.len()
+            && pattern_bytes[pattern_index + 1] == b'*'
+        {
+            star_index = Some(pattern_index);
+            match_index = value_index;
+            pattern_index += 2;
+        } else if pattern_index < pattern_bytes.len() && pattern_bytes[pattern_index] == b'*' {
+            star_index = Some(pattern_index);
+            match_index = value_index;
+            pattern_index += 1;
+        } else if pattern_index < pattern_bytes.len()
+            && pattern_bytes[pattern_index] == value_bytes[value_index]
+        {
+            pattern_index += 1;
+            value_index += 1;
+        } else if let Some(star) = star_index {
+            if pattern_bytes[star] == b'*'
+                && star + 1 < pattern_bytes.len()
+                && pattern_bytes[star + 1] != b'*'
+                && value_bytes.get(match_index) == Some(&b':')
+            {
+                return false;
+            }
+            pattern_index = if star + 1 < pattern_bytes.len() && pattern_bytes[star + 1] == b'*' {
+                star + 2
+            } else {
+                star + 1
+            };
+            match_index += 1;
+            value_index = match_index;
+        } else {
+            return false;
+        }
+    }
+    while pattern_index < pattern_bytes.len() && pattern_bytes[pattern_index] == b'*' {
+        pattern_index += if pattern_index + 1 < pattern_bytes.len()
+            && pattern_bytes[pattern_index + 1] == b'*'
+        {
+            2
+        } else {
+            1
+        };
+    }
+    pattern_index == pattern_bytes.len()
+}
+
+fn toolkit_names(tool_kits: &[ToolKit]) -> String {
+    tool_kits
+        .iter()
+        .map(|toolkit| toolkit.name.clone())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn tool_names(toolkit: &ToolKit) -> String {
+    toolkit
+        .tools
+        .iter()
+        .map(|tool| tool.name.clone())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn is_help_flag(value: &str) -> bool {
+    matches!(value, "--help" | "-h")
+}
+
+fn json_schema_type(schema: &Value) -> Option<&str> {
+    schema.get("type").and_then(Value::as_str)
+}
+
+fn camel_to_kebab(value: &str) -> String {
+    let mut output = String::new();
+    for (index, ch) in value.chars().enumerate() {
+        if ch.is_ascii_uppercase() && index > 0 {
+            output.push('-');
+        }
+        output.push(ch.to_ascii_lowercase());
+    }
+    output
+}
+
+fn normalize_guest_path(path: String) -> String {
+    let absolute = path.starts_with('/');
+    let mut parts = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            _ => parts.push(part),
+        }
+    }
+    let normalized = parts.join("/");
+    if absolute {
+        format!("/{normalized}")
+    } else {
+        normalized
+    }
+}
+
+fn json_object<const N: usize>(entries: [(&str, Value); N]) -> Value {
+    Value::Object(Map::from_iter(
+        entries
+            .into_iter()
+            .map(|(key, value)| (key.to_string(), value)),
+    ))
+}
+
 /// A software package resolved to its host root, paired with the kind that decides how it is mounted.
 struct ResolvedSoftware {
-    descriptor: SoftwareDescriptor,
+    descriptor: wire::SoftwareDescriptor,
     kind: SoftwareKind,
 }
 
@@ -746,7 +2131,7 @@ fn resolve_software(config: &AgentOsConfig) -> Result<Vec<ResolvedSoftware>, Cli
             )));
         }
         resolved.push(ResolvedSoftware {
-            descriptor: SoftwareDescriptor {
+            descriptor: wire::SoftwareDescriptor {
                 package_name: input.package.clone(),
                 root: root.to_string_lossy().into_owned(),
             },
@@ -757,35 +2142,38 @@ fn resolve_software(config: &AgentOsConfig) -> Result<Vec<ResolvedSoftware>, Cli
 }
 
 /// Build the `host_dir` mount descriptors that expose each wasm command directory at
-/// `/__agentos/commands/{index}/` in the guest, so the sidecar's `discover_command_guest_paths` can
+/// `/__secure_exec/commands/{index}/` in the guest, so the sidecar's `discover_command_guest_paths` can
 /// resolve guest commands. Indices are zero-padded so the sidecar's lexical sort preserves numeric
 /// resolution priority past nine packages. Agent/tool packages are skipped here (they are not
 /// command directories). Mirrors the TS `commandDirs` mount loop in `agent-os.ts`.
-fn build_command_mounts(resolved: &[ResolvedSoftware]) -> Vec<MountDescriptor> {
+fn build_command_mounts(
+    resolved: &[ResolvedSoftware],
+) -> Result<Vec<wire::MountDescriptor>, ClientError> {
     let mut mounts = Vec::new();
     for entry in resolved {
         match entry.kind {
             SoftwareKind::WasmCommands => {
                 let index = mounts.len();
-                mounts.push(MountDescriptor {
-                    guest_path: format!("/__agentos/commands/{index:03}"),
+                let config = serde_json::json!({
+                    "hostPath": entry.descriptor.root,
+                    "readOnly": true,
+                });
+                mounts.push(wire::MountDescriptor {
+                    guest_path: format!("/__secure_exec/commands/{index:03}"),
                     read_only: true,
-                    plugin: MountPluginDescriptor {
+                    plugin: wire::MountPluginDescriptor {
                         id: String::from("host_dir"),
-                        config: serde_json::json!({
-                            "hostPath": entry.descriptor.root,
-                            "readOnly": true,
-                        }),
+                        config: json_utf8(&config, "wasm command mount config")?,
                     },
                 });
             }
             SoftwareKind::Agent | SoftwareKind::Tool => {}
         }
     }
-    mounts
+    Ok(mounts)
 }
 
-fn serialize_mounts(config: &AgentOsConfig) -> Result<Vec<MountDescriptor>, ClientError> {
+fn serialize_mounts(config: &AgentOsConfig) -> Result<Vec<wire::MountDescriptor>, ClientError> {
     config
         .mounts
         .iter()
@@ -794,17 +2182,20 @@ fn serialize_mounts(config: &AgentOsConfig) -> Result<Vec<MountDescriptor>, Clie
                 path,
                 plugin,
                 read_only,
-            } => Ok(MountDescriptor {
-                guest_path: path.clone(),
-                read_only: *read_only,
-                plugin: MountPluginDescriptor {
-                    id: plugin.id.clone(),
-                    config: plugin
-                        .config
-                        .clone()
-                        .unwrap_or_else(|| serde_json::Value::Object(Default::default())),
-                },
-            }),
+            } => {
+                let plugin_config = plugin
+                    .config
+                    .clone()
+                    .unwrap_or_else(|| serde_json::Value::Object(Default::default()));
+                Ok(wire::MountDescriptor {
+                    guest_path: path.clone(),
+                    read_only: *read_only,
+                    plugin: wire::MountPluginDescriptor {
+                        id: plugin.id.clone(),
+                        config: json_utf8(&plugin_config, "native mount plugin config")?,
+                    },
+                })
+            }
             MountConfig::Plain { .. } => Err(ClientError::Sidecar(
                 "plain mounts cannot be configured during Rust client VM creation".to_string(),
             )),
@@ -815,69 +2206,104 @@ fn serialize_mounts(config: &AgentOsConfig) -> Result<Vec<MountDescriptor>, Clie
         .collect()
 }
 
-fn permissions_policy(config: &AgentOsConfig) -> PermissionsPolicy {
+fn permissions_policy(config: &AgentOsConfig) -> wire::PermissionsPolicy {
     let Some(permissions) = config.permissions.as_ref() else {
-        return PermissionsPolicy::allow_all();
+        return allow_all_permissions_policy();
     };
 
-    PermissionsPolicy {
+    wire::PermissionsPolicy {
         fs: Some(
             permissions
                 .fs
                 .as_ref()
                 .map(serialize_fs_permissions)
-                .unwrap_or(FsPermissionScope::Mode(WirePermissionMode::Allow)),
+                .unwrap_or(wire::FsPermissionScope::PermissionMode(
+                    wire::PermissionMode::Allow,
+                )),
         ),
         network: Some(
             permissions
                 .network
                 .as_ref()
                 .map(serialize_pattern_permissions)
-                .unwrap_or(PatternPermissionScope::Mode(WirePermissionMode::Allow)),
+                .unwrap_or(wire::PatternPermissionScope::PermissionMode(
+                    wire::PermissionMode::Allow,
+                )),
         ),
         child_process: Some(
             permissions
                 .child_process
                 .as_ref()
                 .map(serialize_pattern_permissions)
-                .unwrap_or(PatternPermissionScope::Mode(WirePermissionMode::Allow)),
+                .unwrap_or(wire::PatternPermissionScope::PermissionMode(
+                    wire::PermissionMode::Allow,
+                )),
         ),
         process: Some(
             permissions
                 .process
                 .as_ref()
                 .map(serialize_pattern_permissions)
-                .unwrap_or(PatternPermissionScope::Mode(WirePermissionMode::Allow)),
+                .unwrap_or(wire::PatternPermissionScope::PermissionMode(
+                    wire::PermissionMode::Allow,
+                )),
         ),
         env: Some(
             permissions
                 .env
                 .as_ref()
                 .map(serialize_pattern_permissions)
-                .unwrap_or(PatternPermissionScope::Mode(WirePermissionMode::Allow)),
+                .unwrap_or(wire::PatternPermissionScope::PermissionMode(
+                    wire::PermissionMode::Allow,
+                )),
         ),
         tool: Some(
             permissions
                 .tool
                 .as_ref()
                 .map(serialize_pattern_permissions)
-                .unwrap_or(PatternPermissionScope::Mode(WirePermissionMode::Allow)),
+                .unwrap_or(wire::PatternPermissionScope::PermissionMode(
+                    wire::PermissionMode::Allow,
+                )),
         ),
     }
 }
 
-fn serialize_fs_permissions(permissions: &crate::config::FsPermissions) -> FsPermissionScope {
+fn allow_all_permissions_policy() -> wire::PermissionsPolicy {
+    wire::PermissionsPolicy {
+        fs: Some(wire::FsPermissionScope::PermissionMode(
+            wire::PermissionMode::Allow,
+        )),
+        network: Some(wire::PatternPermissionScope::PermissionMode(
+            wire::PermissionMode::Allow,
+        )),
+        child_process: Some(wire::PatternPermissionScope::PermissionMode(
+            wire::PermissionMode::Allow,
+        )),
+        process: Some(wire::PatternPermissionScope::PermissionMode(
+            wire::PermissionMode::Allow,
+        )),
+        env: Some(wire::PatternPermissionScope::PermissionMode(
+            wire::PermissionMode::Allow,
+        )),
+        tool: Some(wire::PatternPermissionScope::PermissionMode(
+            wire::PermissionMode::Allow,
+        )),
+    }
+}
+
+fn serialize_fs_permissions(permissions: &crate::config::FsPermissions) -> wire::FsPermissionScope {
     match permissions {
         crate::config::FsPermissions::Mode(mode) => {
-            FsPermissionScope::Mode(serialize_permission_mode(*mode))
+            wire::FsPermissionScope::PermissionMode(serialize_permission_mode(*mode))
         }
         crate::config::FsPermissions::Rules(rules) => {
-            FsPermissionScope::Rules(WireFsPermissionRuleSet {
+            wire::FsPermissionScope::FsPermissionRuleSet(wire::FsPermissionRuleSet {
                 default: rules.default.map(serialize_permission_mode),
                 rules: rules
                     .rules
                     .iter()
-                    .map(|rule| WireFsPermissionRule {
+                    .map(|rule| wire::FsPermissionRule {
                         mode: serialize_permission_mode(rule.mode),
                         operations: operation_wildcard_if_omitted(&rule.operations),
                         paths: resource_wildcard_if_omitted(&rule.paths),
@@ -890,18 +2316,18 @@ fn serialize_fs_permissions(permissions: &crate::config::FsPermissions) -> FsPer
 
 fn serialize_pattern_permissions(
     permissions: &crate::config::PatternPermissions,
-) -> PatternPermissionScope {
+) -> wire::PatternPermissionScope {
     match permissions {
         crate::config::PatternPermissions::Mode(mode) => {
-            PatternPermissionScope::Mode(serialize_permission_mode(*mode))
+            wire::PatternPermissionScope::PermissionMode(serialize_permission_mode(*mode))
         }
         crate::config::PatternPermissions::Rules(rules) => {
-            PatternPermissionScope::Rules(WirePatternPermissionRuleSet {
+            wire::PatternPermissionScope::PatternPermissionRuleSet(wire::PatternPermissionRuleSet {
                 default: rules.default.map(serialize_permission_mode),
                 rules: rules
                     .rules
                     .iter()
-                    .map(|rule| WirePatternPermissionRule {
+                    .map(|rule| wire::PatternPermissionRule {
                         mode: serialize_permission_mode(rule.mode),
                         operations: operation_wildcard_if_omitted(&rule.operations),
                         patterns: resource_wildcard_if_omitted(&rule.patterns),
@@ -912,11 +2338,16 @@ fn serialize_pattern_permissions(
     }
 }
 
-fn serialize_permission_mode(mode: crate::config::PermissionMode) -> WirePermissionMode {
+fn serialize_permission_mode(mode: crate::config::PermissionMode) -> wire::PermissionMode {
     match mode {
-        crate::config::PermissionMode::Allow => WirePermissionMode::Allow,
-        crate::config::PermissionMode::Deny => WirePermissionMode::Deny,
+        crate::config::PermissionMode::Allow => wire::PermissionMode::Allow,
+        crate::config::PermissionMode::Deny => wire::PermissionMode::Deny,
     }
+}
+
+fn json_utf8(value: &serde_json::Value, context: &str) -> Result<String, ClientError> {
+    serde_json::to_string(value)
+        .map_err(|error| ClientError::Sidecar(format!("failed to serialize {context}: {error}")))
 }
 
 fn operation_wildcard_if_omitted(values: &Option<Vec<String>>) -> Vec<String> {
@@ -927,16 +2358,17 @@ fn resource_wildcard_if_omitted(values: &Option<Vec<String>>) -> Vec<String> {
     values.clone().unwrap_or_else(|| vec!["**".to_string()])
 }
 
-/// Extract the `vm_id` from an ownership scope, if it is VM-scoped.
-fn ownership_vm_id(ownership: &OwnershipScope) -> Option<&str> {
+/// Extract the `vm_id` from a generated ownership scope, if it is VM-scoped.
+fn wire_ownership_vm_id(ownership: &wire::OwnershipScope) -> Option<&str> {
     match ownership {
-        OwnershipScope::Vm { vm_id, .. } => Some(vm_id),
-        OwnershipScope::Connection { .. } | OwnershipScope::Session { .. } => None,
+        wire::OwnershipScope::VmOwnership(ownership) => Some(ownership.vm_id.as_str()),
+        wire::OwnershipScope::ConnectionOwnership(_)
+        | wire::OwnershipScope::SessionOwnership(_) => None,
     }
 }
 
 /// Map a `Rejected` response into a [`ClientError::Kernel`] so the errno `code` survives.
-fn rejected_to_error(rejected: agent_os_sidecar::protocol::RejectedResponse) -> ClientError {
+fn rejected_to_error(rejected: wire::RejectedResponse) -> ClientError {
     ClientError::Kernel {
         code: rejected.code,
         message: rejected.message,
@@ -945,17 +2377,20 @@ fn rejected_to_error(rejected: agent_os_sidecar::protocol::RejectedResponse) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::{PatternPermissionScope, WirePermissionMode, permissions_policy};
+    use super::{allow_all_permissions_policy, permissions_policy};
     use crate::config::{
         AgentOsConfig, FsPermissionRule, FsPermissions, PatternPermissions, PermissionMode,
         Permissions, RulePermissions,
+    };
+    use secure_exec_client::wire::{
+        FsPermissionScope, PatternPermissionScope, PermissionMode as WirePermissionMode,
     };
 
     #[test]
     fn permissions_policy_defaults_to_allow_all_when_unset() {
         assert_eq!(
             permissions_policy(&AgentOsConfig::default()),
-            agent_os_sidecar::protocol::PermissionsPolicy::allow_all()
+            allow_all_permissions_policy()
         );
     }
 
@@ -971,11 +2406,15 @@ mod tests {
 
         assert_eq!(
             policy.network,
-            Some(PatternPermissionScope::Mode(WirePermissionMode::Deny))
+            Some(PatternPermissionScope::PermissionMode(
+                WirePermissionMode::Deny
+            ))
         );
         assert_eq!(
             policy.child_process,
-            Some(PatternPermissionScope::Mode(WirePermissionMode::Allow))
+            Some(PatternPermissionScope::PermissionMode(
+                WirePermissionMode::Allow
+            ))
         );
     }
 
@@ -996,7 +2435,7 @@ mod tests {
             ..Default::default()
         });
 
-        let Some(agent_os_sidecar::protocol::FsPermissionScope::Rules(rules)) = policy.fs else {
+        let Some(FsPermissionScope::FsPermissionRuleSet(rules)) = policy.fs else {
             panic!("expected fs rule set");
         };
         assert_eq!(rules.default, Some(WirePermissionMode::Deny));
@@ -1018,7 +2457,7 @@ mod tests {
             ..Default::default()
         });
 
-        let Some(PatternPermissionScope::Rules(rules)) = policy.network else {
+        let Some(PatternPermissionScope::PatternPermissionRuleSet(rules)) = policy.network else {
             panic!("expected network rule set");
         };
         assert_eq!(rules.default, Some(WirePermissionMode::Allow));

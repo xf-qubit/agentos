@@ -67,7 +67,7 @@ export function itIf(
 	it.skip(`${String(name)} [environment prerequisites not met]`, () => {});
 }
 
-// Re-exports from the repo-owned Agent OS test runtime surface.
+// Re-exports from the repo-owned generic runtime surface.
 export {
   AF_INET,
   AF_UNIX,
@@ -76,11 +76,11 @@ export {
   SIGTERM,
   SOCK_DGRAM,
   SOCK_STREAM,
-} from "@rivet-dev/agent-os-core/test/runtime";
+} from "@secure-exec/core/test-runtime";
 import {
 	allowAll,
 	createKernel as createKernelBase,
-} from "@rivet-dev/agent-os-core/test/runtime";
+} from "@secure-exec/core/test-runtime";
 export type {
   DriverProcess,
   Kernel,
@@ -88,20 +88,20 @@ export type {
   KernelRuntimeDriver,
   ProcessContext,
   VirtualFileSystem,
-} from "@rivet-dev/agent-os-core/test/runtime";
+} from "@secure-exec/core/test-runtime";
 export {
 	createWasmVmRuntime,
 	DEFAULT_FIRST_PARTY_TIERS,
 	WASMVM_COMMANDS,
 	type PermissionTier,
 	type WasmVmRuntimeOptions,
-} from "@rivet-dev/agent-os-core/test/runtime";
+} from "@secure-exec/core/test-runtime";
 export {
   createNodeHostNetworkAdapter,
   createNodeRuntime,
   NodeFileSystem,
-  TerminalHarness,
-} from "@rivet-dev/agent-os-core/test/runtime";
+} from "@secure-exec/core/test-runtime";
+export { TerminalHarness } from "./terminal-harness.js";
 
 /**
  * Registry integration tests assume they can bootstrap runtimes and /bin stubs

@@ -24,10 +24,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use anyhow::Result;
 use uuid::Uuid;
 
-use agent_os_sidecar::protocol::{
-    EventPayload, ExecuteRequest, KillProcessRequest, OwnershipScope, ProcessStartedResponse,
-    RejectedResponse, RequestPayload, ResponsePayload, StreamChannel, WriteStdinRequest,
-};
+use secure_exec_client::wire::{self, EventPayload, StreamChannel};
 
 use crate::agent_os::{AcpTerminalEntry, AgentOs, ShellEntry};
 use crate::error::ClientError;
@@ -86,7 +83,7 @@ pub struct ShellHandle {
 // ---------------------------------------------------------------------------
 
 /// Map a [`RejectedResponse`] into a [`ClientError::Kernel`] so the errno `code` survives.
-fn rejected_to_error(rejected: RejectedResponse) -> ClientError {
+fn rejected_to_error(rejected: wire::RejectedResponse) -> ClientError {
     ClientError::Kernel {
         code: rejected.code,
         message: rejected.message,
@@ -150,12 +147,12 @@ impl Drop for AcpTerminalReservation<'_> {
 
 impl AgentOs {
     /// The VM-scoped ownership scope used for every shell/fetch wire request.
-    fn vm_ownership(&self) -> OwnershipScope {
-        OwnershipScope::vm(
-            self.connection_id().to_string(),
-            self.wire_session_id().to_string(),
-            self.vm_id().to_string(),
-        )
+    fn vm_ownership(&self) -> wire::OwnershipScope {
+        wire::OwnershipScope::VmOwnership(wire::VmOwnership {
+            connection_id: self.connection_id().to_string(),
+            session_id: self.wire_session_id().to_string(),
+            vm_id: self.vm_id().to_string(),
+        })
     }
 
     pub(crate) fn finish_acp_terminal(&self, process_id: &str) {
@@ -166,8 +163,8 @@ impl AgentOs {
 
     async fn start_acp_terminal(
         &self,
-        execute: ExecuteRequest,
-        ownership: OwnershipScope,
+        execute: wire::ExecuteRequest,
+        ownership: wire::OwnershipScope,
         pid_tx: tokio::sync::oneshot::Sender<std::result::Result<u32, ClientError>>,
         process_id: &str,
     ) -> Option<u32> {
@@ -185,20 +182,22 @@ impl AgentOs {
 
         let result = match self
             .transport()
-            .request(ownership, RequestPayload::Execute(execute))
+            .request_wire(ownership, wire::RequestPayload::ExecuteRequest(execute))
             .await
         {
-            Ok(ResponsePayload::ProcessStarted(ProcessStartedResponse { pid, .. })) => pid
-                .ok_or_else(|| {
-                    ClientError::Sidecar(
-                        "connect_terminal: sidecar did not return a pid".to_string(),
-                    )
-                }),
-            Ok(ResponsePayload::Rejected(rejected)) => Err(rejected_to_error(rejected)),
+            Ok(wire::ResponsePayload::ProcessStartedResponse(wire::ProcessStartedResponse {
+                pid,
+                ..
+            })) => pid.ok_or_else(|| {
+                ClientError::Sidecar("connect_terminal: sidecar did not return a pid".to_string())
+            }),
+            Ok(wire::ResponsePayload::RejectedResponse(rejected)) => {
+                Err(rejected_to_error(rejected))
+            }
             Ok(other) => Err(ClientError::Sidecar(format!(
                 "unexpected response to connect_terminal: {other:?}"
             ))),
-            Err(error) => Err(error),
+            Err(error) => Err(error.into()),
         };
 
         match result {
@@ -268,7 +267,7 @@ impl AgentOs {
             .command
             .clone()
             .unwrap_or_else(|| DEFAULT_SHELL_COMMAND.to_string());
-        let execute = ExecuteRequest {
+        let execute = wire::ExecuteRequest {
             process_id: process_id.clone(),
             command: Some(command),
             runtime: None,
@@ -288,11 +287,14 @@ impl AgentOs {
         let exit_shell_id = shell_id.clone();
         let exit_key = counter;
         let handle = tokio::spawn(async move {
-            let mut events = agent.transport().subscribe_events();
+            let mut events = agent.transport().subscribe_wire_events();
 
             let response = match agent
                 .transport()
-                .request(ownership.clone(), RequestPayload::Execute(execute))
+                .request_wire(
+                    ownership.clone(),
+                    wire::RequestPayload::ExecuteRequest(execute),
+                )
                 .await
             {
                 Ok(response) => response,
@@ -307,8 +309,9 @@ impl AgentOs {
 
             // Record the real kernel pid on the entry (TS `ShellHandle.pid`) and release the write
             // gate so any queued `write_shell`/`close_shell` proceed against the live spawn.
-            if let ResponsePayload::ProcessStarted(ProcessStartedResponse {
-                pid: Some(pid), ..
+            if let wire::ResponsePayload::ProcessStartedResponse(wire::ProcessStartedResponse {
+                pid: Some(pid),
+                ..
             }) = response
             {
                 agent
@@ -325,7 +328,7 @@ impl AgentOs {
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 };
                 match payload {
-                    EventPayload::ProcessOutput(output) => {
+                    EventPayload::ProcessOutputEvent(output) => {
                         if output.process_id != route_process_id {
                             continue;
                         }
@@ -339,12 +342,14 @@ impl AgentOs {
                             }
                         }
                     }
-                    EventPayload::ProcessExited(exited) => {
+                    EventPayload::ProcessExitedEvent(exited) => {
                         if exited.process_id == route_process_id {
                             break;
                         }
                     }
-                    EventPayload::VmLifecycle(_) | EventPayload::Structured(_) => {}
+                    EventPayload::VmLifecycleEvent(_)
+                    | EventPayload::StructuredEvent(_)
+                    | EventPayload::ExtEnvelope(_) => {}
                 }
             }
 
@@ -392,7 +397,7 @@ impl AgentOs {
             install_output_callback(stderr_tx.clone(), cb);
         }
 
-        let execute = ExecuteRequest {
+        let execute = wire::ExecuteRequest {
             process_id: process_id.clone(),
             command: Some(command),
             runtime: None,
@@ -404,7 +409,7 @@ impl AgentOs {
         };
 
         // Subscribe before issuing the spawn so no output is missed.
-        let events = self.transport().subscribe_events();
+        let events = self.transport().subscribe_wire_events();
         let ownership = self.vm_ownership();
         let (pid_tx, pid_rx) = tokio::sync::oneshot::channel();
         let (start_tx, start_rx) = tokio::sync::oneshot::channel::<()>();
@@ -434,7 +439,7 @@ impl AgentOs {
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 };
                 match payload {
-                    EventPayload::ProcessOutput(output) => {
+                    EventPayload::ProcessOutputEvent(output) => {
                         if output.process_id != route_process_id {
                             continue;
                         }
@@ -447,12 +452,14 @@ impl AgentOs {
                             }
                         }
                     }
-                    EventPayload::ProcessExited(exited) => {
+                    EventPayload::ProcessExitedEvent(exited) => {
                         if exited.process_id == route_process_id {
                             break;
                         }
                     }
-                    EventPayload::VmLifecycle(_) | EventPayload::Structured(_) => {}
+                    EventPayload::VmLifecycleEvent(_)
+                    | EventPayload::StructuredEvent(_)
+                    | EventPayload::ExtEnvelope(_) => {}
                 }
             }
             agent.finish_acp_terminal(&route_process_id);
@@ -519,8 +526,11 @@ impl AgentOs {
         let ownership = self.vm_ownership();
         tokio::spawn(async move {
             wait_for_spawn(spawned_rx).await;
-            let payload = RequestPayload::WriteStdin(WriteStdinRequest { process_id, chunk });
-            if let Err(error) = agent.transport().request(ownership, payload).await {
+            let payload = wire::RequestPayload::WriteStdinRequest(wire::WriteStdinRequest {
+                process_id,
+                chunk,
+            });
+            if let Err(error) = agent.transport().request_wire(ownership, payload).await {
                 tracing::warn!(?error, "write_shell failed");
             }
         });
@@ -586,11 +596,11 @@ impl AgentOs {
         let ownership = self.vm_ownership();
         tokio::spawn(async move {
             wait_for_spawn(spawned_rx).await;
-            let payload = RequestPayload::KillProcess(KillProcessRequest {
+            let payload = wire::RequestPayload::KillProcessRequest(wire::KillProcessRequest {
                 process_id,
                 signal: String::from("SIGTERM"),
             });
-            if let Err(error) = agent.transport().request(ownership, payload).await {
+            if let Err(error) = agent.transport().request_wire(ownership, payload).await {
                 tracing::warn!(?error, "close_shell kill failed");
             }
         });

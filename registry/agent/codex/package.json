@@ -18,7 +18,7 @@
 		"test": "pnpm build && node --test tests/*.test.mjs"
 	},
 	"dependencies": {
-		"@rivet-dev/agent-os-codex": "workspace:*"
+		"@agent-os-pkgs/codex": "catalog:"
 	},
 	"devDependencies": {
 		"@types/node": "^22.10.2",

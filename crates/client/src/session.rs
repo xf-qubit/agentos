@@ -7,7 +7,7 @@
 //! data only. JSON-RPC errors are NOT Rust `Err`; methods that issue requests return a
 //! [`JsonRpcResponse`] whose `error` field may be set.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 
 use std::pin::Pin;
 use std::sync::atomic::Ordering;
@@ -17,21 +17,20 @@ use futures::Stream;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use agent_os_sidecar::protocol::{
-    CloseAgentSessionRequest, CreateSessionRequest, GetSessionStateRequest, GuestRuntimeKind,
-    OwnershipScope, RequestPayload, ResponsePayload, SessionCreatedResponse, SessionRequest,
-    SessionStateResponse, SidecarPermissionRequest, SidecarPermissionResultResponse,
+use agent_os_protocol::ACP_EXTENSION_NAMESPACE;
+use agent_os_protocol::generated::v1::{
+    AcpCloseSessionRequest, AcpCreateSessionRequest, AcpGetSessionStateRequest, AcpRequest,
+    AcpResponse, AcpRuntimeKind, AcpSessionCreatedResponse, AcpSessionRequest,
+    AcpSessionStateResponse,
 };
+use secure_exec_client::wire;
 
 use crate::agent_os::{AgentOs, SessionEntry};
+use crate::config::ToolKit;
 use crate::error::ClientError;
-use crate::json_rpc::{
-    JsonRpcError, JsonRpcId, JsonRpcNotification, JsonRpcResponse, SequencedEvent,
-};
-use crate::stream::{Subscription, subscribe_with_replay};
-use crate::{
-    ACP_SESSION_EVENT_RETENTION_LIMIT, CLOSED_SESSION_ID_RETENTION_LIMIT, PERMISSION_TIMEOUT_MS,
-};
+use crate::json_rpc::{JsonRpcError, JsonRpcId, JsonRpcNotification, JsonRpcResponse};
+use crate::stream::Subscription;
+use crate::{CLOSED_SESSION_ID_RETENTION_LIMIT, PERMISSION_TIMEOUT_MS};
 
 /// ACP method name for legacy permission requests/responses.
 const LEGACY_PERMISSION_METHOD: &str = "request/permission";
@@ -39,11 +38,36 @@ const LEGACY_PERMISSION_METHOD: &str = "request/permission";
 /// Maximum in-flight session RPC requests per session.
 const SESSION_PENDING_REQUEST_LIMIT: usize = 1024;
 
+pub(crate) struct PermissionRouteRequest {
+    pub(crate) session_id: String,
+    pub(crate) permission_id: String,
+    pub(crate) params: Value,
+}
+
+pub(crate) struct PermissionRouteResult {
+    pub(crate) reply: Option<String>,
+}
+
+struct SessionCreatedResponse {
+    session_id: String,
+    modes: Option<Value>,
+    config_options: Vec<Value>,
+    agent_capabilities: Option<Value>,
+    agent_info: Option<Value>,
+}
+
+pub(crate) struct SessionStateResponse {
+    modes: Option<Value>,
+    config_options: Vec<Value>,
+    agent_capabilities: Option<Value>,
+    agent_info: Option<Value>,
+}
+
 /// Maximum bytes accumulated into `PromptResult.text`.
 const PROMPT_TEXT_CAPTURE_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 
-/// Maximum distinct agent-message chunk sequence numbers tracked per prompt call.
-const PROMPT_DELIVERED_CHUNK_SEQUENCE_LIMIT: usize = 262_144;
+/// Maximum agent-message chunks tracked per prompt call.
+const PROMPT_DELIVERED_CHUNK_LIMIT: usize = 262_144;
 
 pub type SessionEventStream = Pin<Box<dyn Stream<Item = JsonRpcNotification> + Send>>;
 pub type SessionEventSubscription = (SessionEventStream, Subscription);
@@ -75,7 +99,7 @@ pub struct AgentRegistryEntry {
 }
 
 /// Built-in agent ids (mirrors the keys of TS `AGENT_CONFIGS`).
-const BUILTIN_AGENT_IDS: [&str; 5] = ["pi", "pi-cli", "opencode", "claude", "codex"];
+const BUILTIN_AGENT_IDS: [&str; 4] = ["pi", "pi-cli", "opencode", "claude"];
 
 /// A built-in agent configuration (port of a TS `AGENT_CONFIGS` entry). System-prompt assembly and
 /// injection are owned by the sidecar.
@@ -128,11 +152,6 @@ fn agent_config(agent_type: &str) -> Option<AgentConfigDef> {
                 ("SHELL", "/bin/sh"),
                 ("USE_BUILTIN_RIPGREP", "0"),
             ],
-        },
-        "codex" => AgentConfigDef {
-            acp_adapter: "@rivet-dev/agent-os-codex-agent",
-            agent_package: "@rivet-dev/agent-os-codex",
-            default_env: &[],
         },
         _ => return None,
     })
@@ -203,7 +222,7 @@ pub struct CreateSessionOptions {
     pub additional_instructions: Option<String>,
 }
 
-/// The id returned by `create_session` / `resume_session`.
+/// The id returned by `create_session`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionId {
     #[serde(rename = "sessionId")]
@@ -215,13 +234,6 @@ pub struct SessionId {
 pub struct PromptResult {
     pub response: JsonRpcResponse,
     pub text: String,
-}
-
-/// Options for `get_session_events`.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct GetEventsOptions {
-    pub since: Option<i64>,
-    pub method: Option<String>,
 }
 
 /// A single session mode (`{ id; name?; label?; description?; [k]: unknown }`).
@@ -506,53 +518,57 @@ fn should_dispatch_to_session_event_handlers(notification: &JsonRpcNotification)
     notification.method == "session/update"
 }
 
-/// Merge incoming sequenced events into the bounded ring, deduped by sequence number, sorted
-/// ascending, and truncated to [`ACP_SESSION_EVENT_RETENTION_LIMIT`]. Mirrors `mergeSequencedEvents`.
-fn merge_sequenced_events(ring: &mut VecDeque<SequencedEvent>, incoming: Vec<SequencedEvent>) {
-    let mut by_sequence: BTreeMap<i64, SequencedEvent> = BTreeMap::new();
-    for event in ring.drain(..) {
-        by_sequence.insert(event.sequence_number, event);
+pub(crate) fn record_live_session_event(entry: &SessionEntry, notification: JsonRpcNotification) {
+    apply_session_update(entry, &notification);
+    if should_dispatch_to_session_event_handlers(&notification) {
+        let _ = entry.event_tx.send(notification);
     }
-    for event in incoming {
-        by_sequence.insert(event.sequence_number, event);
-    }
-    let mut merged: Vec<SequencedEvent> = by_sequence.into_values().collect();
-    if merged.len() > ACP_SESSION_EVENT_RETENTION_LIMIT {
-        let start = merged.len() - ACP_SESSION_EVENT_RETENTION_LIMIT;
-        merged.drain(0..start);
-    }
-    *ring = merged.into();
 }
 
-/// Compute the next highest acknowledged sequence number. Mirrors `nextHighestSequenceNumber`.
-fn next_highest_sequence_number(
-    current: Option<i64>,
-    ring: &VecDeque<SequencedEvent>,
-) -> Option<i64> {
-    let Some(latest) = ring.back().map(|event| event.sequence_number) else {
-        return current;
+fn apply_session_update(entry: &SessionEntry, notification: &JsonRpcNotification) {
+    if notification.method != "session/update" {
+        return;
+    }
+    let Some(params) = notification.params.as_ref().and_then(Value::as_object) else {
+        return;
     };
-    match current {
-        None => Some(latest),
-        Some(current) => Some(current.max(latest)),
+    let update = params
+        .get("update")
+        .and_then(Value::as_object)
+        .unwrap_or(params);
+    match update.get("sessionUpdate").and_then(Value::as_str) {
+        Some("current_mode_update") => {
+            let Some(mode_id) = update.get("currentModeId").and_then(Value::as_str) else {
+                return;
+            };
+            let mut modes = entry.modes.lock();
+            if let Some(modes) = modes.as_mut() {
+                modes.current_mode_id = mode_id.to_string();
+            }
+        }
+        Some("config_option_update") | Some("config_options_update") => {
+            let Some(options) = update.get("configOptions").and_then(Value::as_array) else {
+                return;
+            };
+            let parsed = options
+                .iter()
+                .filter_map(|value| serde_json::from_value(value.clone()).ok())
+                .collect();
+            *entry.config_options.lock() = parsed;
+            apply_synthetic_config_overrides(entry);
+        }
+        Some("agent_message_chunk") | None | Some(_) => {}
     }
 }
 
 fn accumulate_agent_message_chunk(
-    event: &SequencedEvent,
-    start_after: i64,
-    delivered_chunk_sequences: &mut BTreeSet<i64>,
+    notification: &JsonRpcNotification,
+    delivered_chunks: &mut usize,
     agent_text: &mut String,
 ) -> std::result::Result<(), ClientError> {
-    if event.sequence_number <= start_after {
-        return Ok(());
-    }
-    let params = event.notification.params.clone().unwrap_or(Value::Null);
+    let params = notification.params.clone().unwrap_or(Value::Null);
     let update = params.get("update").cloned().unwrap_or(Value::Null);
     if update.get("sessionUpdate").and_then(Value::as_str) != Some("agent_message_chunk") {
-        return Ok(());
-    }
-    if delivered_chunk_sequences.contains(&event.sequence_number) {
         return Ok(());
     }
     if let Some(chunk) = update
@@ -560,8 +576,8 @@ fn accumulate_agent_message_chunk(
         .and_then(|content| content.get("text"))
         .and_then(Value::as_str)
     {
-        if delivered_chunk_sequences.len() >= PROMPT_DELIVERED_CHUNK_SEQUENCE_LIMIT {
-            return Err(prompt_chunk_sequence_limit_error());
+        if *delivered_chunks >= PROMPT_DELIVERED_CHUNK_LIMIT {
+            return Err(prompt_chunk_limit_error());
         }
         let next_len = agent_text
             .len()
@@ -571,7 +587,7 @@ fn accumulate_agent_message_chunk(
             return Err(prompt_text_limit_error(next_len));
         }
         agent_text.push_str(chunk);
-        delivered_chunk_sequences.insert(event.sequence_number);
+        *delivered_chunks += 1;
     }
     Ok(())
 }
@@ -590,9 +606,9 @@ fn prompt_text_limit_error(size: usize) -> ClientError {
     ))
 }
 
-fn prompt_chunk_sequence_limit_error() -> ClientError {
+fn prompt_chunk_limit_error() -> ClientError {
     ClientError::Sidecar(format!(
-        "prompt chunk sequence tracking limit exceeded: at most {PROMPT_DELIVERED_CHUNK_SEQUENCE_LIMIT} chunks can be captured per prompt"
+        "prompt chunk tracking limit exceeded: at most {PROMPT_DELIVERED_CHUNK_LIMIT} chunks can be captured per prompt"
     ))
 }
 
@@ -634,76 +650,44 @@ impl Drop for PendingSessionRequestGuard<'_> {
 mod prompt_accumulation_tests {
     use super::*;
 
-    fn event(sequence_number: i64, update: Value) -> SequencedEvent {
-        SequencedEvent {
-            sequence_number,
-            notification: JsonRpcNotification {
-                jsonrpc: "2.0".to_string(),
-                method: "session/update".to_string(),
-                params: Some(json!({ "update": update })),
-            },
+    fn notification(update: Value) -> JsonRpcNotification {
+        JsonRpcNotification {
+            jsonrpc: "2.0".to_string(),
+            method: "session/update".to_string(),
+            params: Some(json!({ "update": update })),
         }
     }
 
     #[test]
-    fn hydrated_chunk_is_not_hidden_by_later_non_chunk_event() {
-        let start_after = 9;
-        let chunk = event(
-            10,
-            json!({
-                "sessionUpdate": "agent_message_chunk",
-                "content": { "text": "hello" },
-            }),
-        );
-        let later_non_chunk = event(
-            11,
-            json!({
-                "sessionUpdate": "current_mode_update",
-                "currentModeId": "default",
-            }),
-        );
+    fn non_chunk_events_do_not_affect_prompt_text() {
+        let chunk = notification(json!({
+            "sessionUpdate": "agent_message_chunk",
+            "content": { "text": "hello" },
+        }));
+        let non_chunk = notification(json!({
+            "sessionUpdate": "current_mode_update",
+            "currentModeId": "default",
+        }));
 
-        let mut delivered_chunk_sequences = BTreeSet::new();
+        let mut delivered_chunks = 0;
         let mut text = String::new();
-        accumulate_agent_message_chunk(
-            &later_non_chunk,
-            start_after,
-            &mut delivered_chunk_sequences,
-            &mut text,
-        )
-        .expect("later non-chunk");
-        accumulate_agent_message_chunk(
-            &chunk,
-            start_after,
-            &mut delivered_chunk_sequences,
-            &mut text,
-        )
-        .expect("chunk");
-        accumulate_agent_message_chunk(
-            &chunk,
-            start_after,
-            &mut delivered_chunk_sequences,
-            &mut text,
-        )
-        .expect("duplicate chunk");
+        accumulate_agent_message_chunk(&non_chunk, &mut delivered_chunks, &mut text)
+            .expect("non-chunk");
+        accumulate_agent_message_chunk(&chunk, &mut delivered_chunks, &mut text).expect("chunk");
 
         assert_eq!(text, "hello");
     }
 
     #[test]
     fn prompt_text_capture_limit_rejects_overflowing_chunk() {
-        let chunk = event(
-            10,
-            json!({
-                "sessionUpdate": "agent_message_chunk",
-                "content": { "text": "abcd" },
-            }),
-        );
-        let mut delivered_chunk_sequences = BTreeSet::new();
+        let chunk = notification(json!({
+            "sessionUpdate": "agent_message_chunk",
+            "content": { "text": "abcd" },
+        }));
+        let mut delivered_chunks = 0;
         let mut text = "x".repeat(PROMPT_TEXT_CAPTURE_LIMIT_BYTES - 3);
-        let error =
-            accumulate_agent_message_chunk(&chunk, 9, &mut delivered_chunk_sequences, &mut text)
-                .expect_err("chunk should exceed prompt text cap");
+        let error = accumulate_agent_message_chunk(&chunk, &mut delivered_chunks, &mut text)
+            .expect_err("chunk should exceed prompt text cap");
         assert!(
             error.to_string().contains("prompt text capture is"),
             "unexpected error: {error}"
@@ -712,24 +696,19 @@ mod prompt_accumulation_tests {
     }
 
     #[test]
-    fn prompt_chunk_sequence_limit_rejects_more_tracked_chunks() {
-        let chunk = event(
-            PROMPT_DELIVERED_CHUNK_SEQUENCE_LIMIT as i64 + 10,
-            json!({
-                "sessionUpdate": "agent_message_chunk",
-                "content": { "text": "x" },
-            }),
-        );
-        let mut delivered_chunk_sequences =
-            BTreeSet::from_iter(0..PROMPT_DELIVERED_CHUNK_SEQUENCE_LIMIT as i64);
+    fn prompt_chunk_limit_rejects_more_tracked_chunks() {
+        let chunk = notification(json!({
+            "sessionUpdate": "agent_message_chunk",
+            "content": { "text": "x" },
+        }));
+        let mut delivered_chunks = PROMPT_DELIVERED_CHUNK_LIMIT;
         let mut text = String::new();
-        let error =
-            accumulate_agent_message_chunk(&chunk, -1, &mut delivered_chunk_sequences, &mut text)
-                .expect_err("chunk should exceed sequence tracking cap");
+        let error = accumulate_agent_message_chunk(&chunk, &mut delivered_chunks, &mut text)
+            .expect_err("chunk should exceed chunk tracking cap");
         assert!(
             error
                 .to_string()
-                .contains("prompt chunk sequence tracking limit exceeded"),
+                .contains("prompt chunk tracking limit exceeded"),
             "unexpected error: {error}"
         );
         assert!(text.is_empty());
@@ -746,8 +725,6 @@ mod prompt_accumulation_tests {
             capabilities: parking_lot::Mutex::new(None),
             agent_info: parking_lot::Mutex::new(None),
             config_overrides: parking_lot::Mutex::new(BTreeMap::new()),
-            event_ring: parking_lot::Mutex::new(VecDeque::new()),
-            highest_sequence_number: std::sync::atomic::AtomicI64::new(-1),
             event_tx,
             permission_tx,
             pending_permission_replies: scc::HashMap::new(),
@@ -795,7 +772,7 @@ fn apply_synthetic_config_overrides(entry: &SessionEntry) {
 const PENDING_METHOD_PREFIX: &str = "__pending_method::";
 
 /// Apply the local cache mutations of `_syncSessionState`: modes, config options, capabilities,
-/// agent info, and merged events from a sidecar [`SessionStateResponse`].
+/// and agent info from a sidecar [`SessionStateResponse`].
 fn sync_session_state(entry: &SessionEntry, state: &SessionStateResponse) {
     *entry.modes.lock() = state
         .modes
@@ -822,41 +799,6 @@ fn sync_session_state(entry: &SessionEntry, state: &SessionStateResponse) {
         .as_ref()
         .filter(|value| value.is_object())
         .and_then(|value| serde_json::from_value(value.clone()).ok());
-
-    let incoming: Vec<SequencedEvent> = state
-        .events
-        .iter()
-        .filter_map(|event| {
-            serde_json::from_value::<JsonRpcNotification>(event.notification.clone())
-                .ok()
-                .map(|notification| SequencedEvent {
-                    sequence_number: event.sequence_number as i64,
-                    notification,
-                })
-        })
-        .collect();
-
-    let previous_highest = entry.highest_sequence_number.load(Ordering::SeqCst);
-    let dispatchable_new_events = incoming
-        .iter()
-        .filter(|event| {
-            event.sequence_number > previous_highest
-                && should_dispatch_to_session_event_handlers(&event.notification)
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-
-    let mut ring = entry.event_ring.lock();
-    merge_sequenced_events(&mut ring, incoming);
-    let next = next_highest_sequence_number(Some(previous_highest), &ring);
-    if let Some(next) = next {
-        entry.highest_sequence_number.store(next, Ordering::SeqCst);
-    }
-    drop(ring);
-
-    for event in dispatchable_new_events {
-        let _ = entry.event_tx.send(event);
-    }
 }
 
 /// Synthesize the unsupported-config JSON-RPC error response (`-32601`). Mirrors
@@ -893,18 +835,212 @@ fn session_closed_response(session_id: &str) -> JsonRpcResponse {
     }
 }
 
+fn session_created_from_acp(
+    response: AcpSessionCreatedResponse,
+) -> std::result::Result<SessionCreatedResponse, ClientError> {
+    Ok(SessionCreatedResponse {
+        session_id: response.session_id,
+        modes: parse_optional_json(response.modes, "modes")?,
+        config_options: parse_json_vec(response.config_options, "configOptions")?,
+        agent_capabilities: parse_optional_json(response.agent_capabilities, "agentCapabilities")?,
+        agent_info: parse_optional_json(response.agent_info, "agentInfo")?,
+    })
+}
+
+fn session_state_from_acp(
+    response: AcpSessionStateResponse,
+) -> std::result::Result<SessionStateResponse, ClientError> {
+    Ok(SessionStateResponse {
+        modes: parse_optional_json(response.modes, "modes")?,
+        config_options: parse_json_vec(response.config_options, "configOptions")?,
+        agent_capabilities: parse_optional_json(response.agent_capabilities, "agentCapabilities")?,
+        agent_info: parse_optional_json(response.agent_info, "agentInfo")?,
+    })
+}
+
+fn parse_optional_json(
+    value: Option<String>,
+    label: &str,
+) -> std::result::Result<Option<Value>, ClientError> {
+    value
+        .map(|value| {
+            serde_json::from_str(&value).map_err(|error| {
+                ClientError::Sidecar(format!("malformed ACP {label} JSON: {error}"))
+            })
+        })
+        .transpose()
+}
+
+fn parse_json_vec(
+    values: Vec<String>,
+    label: &str,
+) -> std::result::Result<Vec<Value>, ClientError> {
+    values
+        .into_iter()
+        .map(|value| {
+            serde_json::from_str(&value).map_err(|error| {
+                ClientError::Sidecar(format!("malformed ACP {label} JSON: {error}"))
+            })
+        })
+        .collect()
+}
+
+fn unexpected_acp_response(operation: &str, response: AcpResponse) -> ClientError {
+    ClientError::Sidecar(format!("unexpected response to {operation}: {response:?}"))
+}
+
+fn combine_instructions(additional: Option<&str>, tool_reference: &str) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(additional) = additional.map(str::trim).filter(|value| !value.is_empty()) {
+        parts.push(additional.to_string());
+    }
+    let tool_reference = tool_reference.trim();
+    if !tool_reference.is_empty() {
+        parts.push(tool_reference.to_string());
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n\n"))
+    }
+}
+
+fn build_host_tool_reference(tool_kits: &[ToolKit]) -> String {
+    if tool_kits.is_empty() {
+        return String::new();
+    }
+
+    let mut lines = vec![
+        String::from("## Available Host Tools"),
+        String::new(),
+        String::from("Run `agentos list-tools` to see all available tools."),
+        String::new(),
+    ];
+
+    for kit in tool_kits {
+        lines.push(format!("### {}", kit.name));
+        lines.push(String::new());
+        lines.push(kit.description.clone());
+        lines.push(String::new());
+        for tool in &kit.tools {
+            let signature = build_tool_flag_signature(&tool.input_schema);
+            let suffix = if signature.is_empty() {
+                String::new()
+            } else {
+                format!(" {signature}")
+            };
+            lines.push(format!(
+                "- `agentos-{} {}{}` — {}",
+                kit.name, tool.name, suffix, tool.description
+            ));
+        }
+        lines.push(String::new());
+        lines.push(format!(
+            "Run `agentos-{} <tool> --help` for details.",
+            kit.name
+        ));
+        lines.push(String::new());
+    }
+
+    lines.join("\n")
+}
+
+fn build_tool_flag_signature(schema: &Value) -> String {
+    describe_tool_flags(schema)
+        .into_iter()
+        .map(|flag| {
+            if flag.required {
+                format!("{} <{}>", flag.name, flag.value_type)
+            } else {
+                format!("[{} <{}>]", flag.name, flag.value_type)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+struct ToolFlagDescription {
+    name: String,
+    value_type: String,
+    required: bool,
+}
+
+fn describe_tool_flags(schema: &Value) -> Vec<ToolFlagDescription> {
+    let properties = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let required = schema
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
+
+    properties
+        .into_iter()
+        .map(|(field_name, field_schema)| ToolFlagDescription {
+            name: format!("--{}", camel_to_kebab(&field_name)),
+            value_type: describe_tool_flag_type(&field_schema),
+            required: required.contains(&field_name),
+        })
+        .collect()
+}
+
+fn describe_tool_flag_type(schema: &Value) -> String {
+    match json_schema_type(schema) {
+        Some("array") => {
+            let item_type = schema
+                .get("items")
+                .and_then(json_schema_type)
+                .unwrap_or("string");
+            format!("{item_type}[]")
+        }
+        Some("string") => schema
+            .get("enum")
+            .and_then(Value::as_array)
+            .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>())
+            .filter(|values| !values.is_empty())
+            .map(|values| values.join("|"))
+            .unwrap_or_else(|| String::from("string")),
+        Some(other) => other.to_string(),
+        None => String::from("string"),
+    }
+}
+
+fn json_schema_type(schema: &Value) -> Option<&str> {
+    schema.get("type").and_then(Value::as_str)
+}
+
+fn camel_to_kebab(value: &str) -> String {
+    let mut output = String::new();
+    for (index, ch) in value.chars().enumerate() {
+        if ch.is_ascii_uppercase() && index > 0 {
+            output.push('-');
+        }
+        output.push(ch.to_ascii_lowercase());
+    }
+    output
+}
+
 // ---------------------------------------------------------------------------
 // Methods
 // ---------------------------------------------------------------------------
 
 impl AgentOs {
     /// VM-scoped ownership for session RPCs.
-    fn session_ownership(&self) -> OwnershipScope {
-        OwnershipScope::vm(
-            self.connection_id().to_string(),
-            self.wire_session_id().to_string(),
-            self.vm_id().to_string(),
-        )
+    fn session_ownership(&self) -> wire::OwnershipScope {
+        wire::OwnershipScope::VmOwnership(wire::VmOwnership {
+            connection_id: self.connection_id().to_string(),
+            session_id: self.wire_session_id().to_string(),
+            vm_id: self.vm_id().to_string(),
+        })
     }
 
     /// Look up a session entry or return [`ClientError::SessionNotFound`]. Mirrors `_requireSession`.
@@ -919,46 +1055,27 @@ impl AgentOs {
             .ok_or_else(|| ClientError::SessionNotFound(session_id.to_string()))
     }
 
-    /// Re-hydrate cached session state from the sidecar `GetSessionState` snapshot, acknowledging the
-    /// highest seen sequence number. Mirrors `_hydrateSessionState`.
+    /// Re-hydrate cached session state from the sidecar `AcpGetSessionStateRequest` snapshot.
+    /// Mirrors `_hydrateSessionState`.
     async fn hydrate_session_state(
         &self,
         session_id: &str,
     ) -> std::result::Result<(), ClientError> {
-        let acknowledged = self.require_session(session_id, |entry| {
-            let highest = entry.highest_sequence_number.load(Ordering::SeqCst);
-            if highest >= 0 {
-                Some(highest as u64)
-            } else {
-                None
-            }
-        })?;
-
+        self.require_session(session_id, |_| ())?;
         let response = self
-            .transport()
-            .request(
-                self.session_ownership(),
-                RequestPayload::GetSessionState(GetSessionStateRequest {
+            .send_acp_request(AcpRequest::AcpGetSessionStateRequest(
+                AcpGetSessionStateRequest {
                     session_id: session_id.to_string(),
-                    acknowledged_sequence_number: acknowledged,
-                }),
-            )
+                },
+            ))
             .await?;
-
-        let state = match response {
-            ResponsePayload::SessionState(state) => state,
-            ResponsePayload::Rejected(rejected) => {
-                return Err(ClientError::Kernel {
-                    code: rejected.code,
-                    message: rejected.message,
-                });
-            }
-            other => {
-                return Err(ClientError::Sidecar(format!(
-                    "unexpected response to GetSessionState: {other:?}"
-                )));
-            }
+        let AcpResponse::AcpSessionStateResponse(state) = response else {
+            return Err(unexpected_acp_response(
+                "AcpGetSessionStateRequest",
+                response,
+            ));
         };
+        let state = session_state_from_acp(state)?;
 
         self.require_session(session_id, |entry| sync_session_state(entry, &state))?;
         Ok(())
@@ -1002,15 +1119,17 @@ impl AgentOs {
         let mut pending_request_guard =
             PendingSessionRequestGuard::new(self, session_id, resolver_id);
 
-        let transport = self.transport();
-        let ownership = self.session_ownership();
-        let session_request = SessionRequest {
+        let rpc = self.send_acp_request(AcpRequest::AcpSessionRequest(AcpSessionRequest {
             session_id: session_id.to_string(),
             method: method.to_string(),
-            params: request_params.clone(),
-        };
-
-        let rpc = transport.request(ownership, RequestPayload::SessionRequest(session_request));
+            params: request_params
+                .clone()
+                .map(|params| serde_json::to_string(&params))
+                .transpose()
+                .map_err(|error| {
+                    ClientError::Sidecar(format!("failed to encode session params: {error}"))
+                })?,
+        }));
         tokio::pin!(rpc);
 
         let response = tokio::select! {
@@ -1032,22 +1151,12 @@ impl AgentOs {
         };
 
         let response = match response {
-            ResponsePayload::SessionRpc(rpc) => {
-                serde_json::from_value::<JsonRpcResponse>(rpc.response).map_err(|err| {
+            AcpResponse::AcpSessionRpcResponse(rpc) => {
+                serde_json::from_str::<JsonRpcResponse>(&rpc.response).map_err(|err| {
                     ClientError::Sidecar(format!("malformed session rpc response: {err}"))
                 })?
             }
-            ResponsePayload::Rejected(rejected) => {
-                return Err(ClientError::Kernel {
-                    code: rejected.code,
-                    message: rejected.message,
-                });
-            }
-            other => {
-                return Err(ClientError::Sidecar(format!(
-                    "unexpected response to SessionRequest: {other:?}"
-                )));
-            }
+            other => return Err(unexpected_acp_response("AcpSessionRequest", other)),
         };
 
         // Re-hydrate state regardless of outcome (best-effort; ignore errors).
@@ -1184,9 +1293,9 @@ impl AgentOs {
 
     /// Create an ACP session. Resolves the agent config, merges env (user wins), creates the session
     /// via the sidecar (`runtime: java_script`, protocol v1, default client caps), and hydrates
-    /// state. System-prompt assembly and injection are owned by the sidecar; the client only
-    /// forwards `additional_instructions` / `skip_os_instructions`. On hydration failure the session
-    /// is removed and the error rethrown. Returns the session id only.
+    /// state. Agent OS owns dynamic tool-reference instructions and forwards them as additional
+    /// instructions; the sidecar owns final base-prompt assembly and agent-specific injection. On
+    /// hydration failure the session is removed and the error rethrown. Returns the session id only.
     pub async fn create_session(
         &self,
         agent_type: &str,
@@ -1202,11 +1311,9 @@ impl AgentOs {
 
         // Resolve the ACP adapter's VM bin entrypoint from the host node_modules (mirrors TS
         // `_resolveAdapterBin` / `_resolvePackageBin`).
-        let adapter_entrypoint =
-            resolve_package_bin(&module_access_cwd, config.acp_adapter, None)?;
+        let adapter_entrypoint = resolve_package_bin(&module_access_cwd, config.acp_adapter, None)?;
 
-        // Merge env: agent default_env (lowest) -> user env (wins). System-prompt assembly and
-        // injection (launch args / OPENCODE_CONTEXTPATHS) are owned by the sidecar at CreateSession.
+        // Merge env: agent default_env (lowest) -> user env (wins).
         let mut env: BTreeMap<String, String> = config
             .default_env
             .iter()
@@ -1215,8 +1322,7 @@ impl AgentOs {
         for (key, value) in &options.env {
             env.insert(key.clone(), value.clone());
         }
-        if (agent_type == "pi" || agent_type == "pi-cli")
-            && !env.contains_key("PI_ACP_PI_COMMAND")
+        if (agent_type == "pi" || agent_type == "pi-cli") && !env.contains_key("PI_ACP_PI_COMMAND")
         {
             if let Ok(pi_command) =
                 resolve_package_bin(&module_access_cwd, config.agent_package, Some("pi"))
@@ -1225,7 +1331,10 @@ impl AgentOs {
             }
         }
 
-        let cwd = options.cwd.clone().unwrap_or_else(|| "/home/user".to_string());
+        let cwd = options
+            .cwd
+            .clone()
+            .unwrap_or_else(|| "/home/user".to_string());
         let mcp_servers: Vec<Value> = options
             .mcp_servers
             .iter()
@@ -1235,56 +1344,47 @@ impl AgentOs {
             "fs": { "readTextFile": true, "writeTextFile": true },
             "terminal": true,
         });
+        let tool_reference = build_host_tool_reference(&self.config().tool_kits);
+        let additional_instructions =
+            combine_instructions(options.additional_instructions.as_deref(), &tool_reference);
 
         let response = self
-            .transport()
-            .request(
-                self.session_ownership(),
-                RequestPayload::CreateSession(CreateSessionRequest {
+            .send_acp_request(AcpRequest::AcpCreateSessionRequest(
+                AcpCreateSessionRequest {
                     agent_type: agent_type.to_string(),
-                    runtime: GuestRuntimeKind::JavaScript,
+                    runtime: AcpRuntimeKind::JavaScript,
                     adapter_entrypoint,
                     args: Vec::new(),
-                    env,
+                    env: env.into_iter().collect(),
                     cwd,
-                    mcp_servers,
-                    protocol_version: crate::ACP_PROTOCOL_VERSION,
-                    client_capabilities,
-                    additional_instructions: options.additional_instructions.clone(),
+                    mcp_servers: serde_json::to_string(&mcp_servers).map_err(|error| {
+                        ClientError::Sidecar(format!("failed to encode MCP servers: {error}"))
+                    })?,
+                    protocol_version: crate::ACP_PROTOCOL_VERSION as i32,
+                    client_capabilities: serde_json::to_string(&client_capabilities).map_err(
+                        |error| {
+                            ClientError::Sidecar(format!(
+                                "failed to encode client capabilities: {error}"
+                            ))
+                        },
+                    )?,
+                    additional_instructions,
                     skip_os_instructions: options.skip_os_instructions,
-                }),
-            )
+                },
+            ))
             .await?;
-        let created: SessionCreatedResponse = match response {
-            ResponsePayload::SessionCreated(created) => created,
-            ResponsePayload::Rejected(rejected) => {
-                return Err(ClientError::Kernel {
-                    code: rejected.code,
-                    message: rejected.message,
-                }
-                .into());
-            }
-            other => {
-                return Err(ClientError::Sidecar(format!(
-                    "unexpected create_session response: {other:?}"
-                ))
-                .into());
-            }
+        let AcpResponse::AcpSessionCreatedResponse(created) = response else {
+            return Err(unexpected_acp_response("AcpCreateSessionRequest", response).into());
         };
+        let created = session_created_from_acp(created)?;
 
-        // Seed local state from the create response, then register + hydrate (re-fetches the
-        // authoritative state from the sidecar). `process_id` is filled by the hydrate snapshot.
+        // Seed local state from the create response, then register + hydrate from the authoritative
+        // sidecar state.
         let state = SessionStateResponse {
-            session_id: created.session_id.clone(),
-            agent_type: agent_type.to_string(),
-            process_id: String::new(),
-            pid: created.pid,
-            closed: false,
             modes: created.modes,
             config_options: created.config_options,
             agent_capabilities: created.agent_capabilities,
             agent_info: created.agent_info,
-            events: Vec::new(),
         };
         self.register_session(&created.session_id, agent_type, &state)
             .await?;
@@ -1308,8 +1408,7 @@ impl AgentOs {
             closed.retain(|id| id != session_id);
         }
 
-        let (event_tx, _) =
-            tokio::sync::broadcast::channel(ACP_SESSION_EVENT_RETENTION_LIMIT.max(1));
+        let (event_tx, _) = tokio::sync::broadcast::channel(1024);
         let (permission_tx, _) = tokio::sync::broadcast::channel(64);
         let entry = SessionEntry {
             agent_type: agent_type.to_string(),
@@ -1318,8 +1417,6 @@ impl AgentOs {
             capabilities: parking_lot::Mutex::new(None),
             agent_info: parking_lot::Mutex::new(None),
             config_overrides: parking_lot::Mutex::new(BTreeMap::new()),
-            event_ring: parking_lot::Mutex::new(VecDeque::new()),
-            highest_sequence_number: std::sync::atomic::AtomicI64::new(-1),
             event_tx,
             permission_tx,
             pending_permission_replies: scc::HashMap::new(),
@@ -1338,14 +1435,6 @@ impl AgentOs {
         }
     }
 
-    /// Resume an existing session. SYNC. Existence check + echo; no sidecar call.
-    pub fn resume_session(&self, session_id: &str) -> std::result::Result<SessionId, ClientError> {
-        self.require_session(session_id, |_| ())?;
-        Ok(SessionId {
-            session_id: session_id.to_string(),
-        })
-    }
-
     /// Destroy a session. Best-effort `cancel_session` then internal close.
     pub async fn destroy_session(&self, session_id: &str) -> Result<()> {
         self.require_session(session_id, |_| ())?;
@@ -1354,25 +1443,14 @@ impl AgentOs {
         Ok(())
     }
 
-    /// Prompt a session. Uses a NO-REPLAY internal subscribe; accumulates `agent_message_chunk`
-    /// text; sends `session/prompt`; unsubscribes by dropping the receiver. The `response` may
-    /// itself be an error.
+    /// Prompt a session. Subscribes to live `session/update` events, accumulates
+    /// `agent_message_chunk` text, sends `session/prompt`, and unsubscribes by dropping the
+    /// receiver. The `response` may itself be an error.
     pub async fn prompt(&self, session_id: &str, text: &str) -> Result<PromptResult> {
-        // No-replay subscription: start after the current highest sequence so only future chunks
-        // accumulate. Mirrors `_subscribeSessionEvents(..., { replayBuffered: false })`.
-        let (mut rx, start_after) = self.require_session(session_id, |entry| {
-            let ring = entry.event_ring.lock();
-            let latest = ring
-                .iter()
-                .rev()
-                .find(|event| should_dispatch_to_session_event_handlers(&event.notification))
-                .map(|event| event.sequence_number)
-                .unwrap_or(i64::MIN);
-            (entry.event_tx.subscribe(), latest)
-        })?;
+        let mut rx = self.require_session(session_id, |entry| entry.event_tx.subscribe())?;
 
         let mut agent_text = String::new();
-        let mut delivered_chunk_sequences = BTreeSet::new();
+        let mut delivered_chunks = 0;
         let mut prompt_text_error: Option<ClientError> = None;
 
         let request = self.send_session_request(
@@ -1392,8 +1470,7 @@ impl AgentOs {
                     match event {
                         Ok(event) => accumulate_agent_message_chunk(
                             &event,
-                            start_after,
-                            &mut delivered_chunk_sequences,
+                            &mut delivered_chunks,
                             &mut agent_text,
                         )
                         .unwrap_or_else(|error| {
@@ -1409,21 +1486,15 @@ impl AgentOs {
             }
         };
 
-        // The prompt has resolved; `send_session_request` re-hydrates state (recording any final
-        // chunks) before returning. Drain every remaining buffered broadcast event with `try_recv`
-        // until empty before unsubscribing (= the TS `finally { unsubscribe() }`), so chunks emitted
-        // late (during the final hydrate) but not yet received are not dropped.
+        // Drain already-buffered live events before unsubscribing.
         loop {
             match rx.try_recv() {
-                Ok(event) => accumulate_agent_message_chunk(
-                    &event,
-                    start_after,
-                    &mut delivered_chunk_sequences,
-                    &mut agent_text,
-                )
-                .unwrap_or_else(|error| {
-                    prompt_text_error.get_or_insert(error);
-                }),
+                Ok(event) => {
+                    accumulate_agent_message_chunk(&event, &mut delivered_chunks, &mut agent_text)
+                        .unwrap_or_else(|error| {
+                            prompt_text_error.get_or_insert(error);
+                        })
+                }
                 Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => continue,
                 Err(tokio::sync::broadcast::error::TryRecvError::Empty)
                 | Err(tokio::sync::broadcast::error::TryRecvError::Closed) => break,
@@ -1432,23 +1503,6 @@ impl AgentOs {
         drop(rx);
 
         let response = response?;
-        // Reconcile from the authoritative event ring: a short reply can be recorded entirely during
-        // the request's final hydration, after the broadcast subscription stopped delivering. The
-        // accumulator dedups by sequence, so chunks already seen on the broadcast are not double-counted.
-        let hydrated_events = self.require_session(session_id, |entry| {
-            entry.event_ring.lock().iter().cloned().collect::<Vec<_>>()
-        })?;
-        for event in &hydrated_events {
-            accumulate_agent_message_chunk(
-                event,
-                start_after,
-                &mut delivered_chunk_sequences,
-                &mut agent_text,
-            )
-            .unwrap_or_else(|error| {
-                prompt_text_error.get_or_insert(error);
-            });
-        }
         if let Some(error) = prompt_text_error {
             return Err(error.into());
         }
@@ -1603,7 +1657,7 @@ impl AgentOs {
     }
 
     /// Internal close: abort pending requests, reject pending permissions, deregister the session,
-    /// record the closed id (bounded), and best-effort `CloseAgentSession`. Mirrors
+    /// record the closed id (bounded), and best-effort `AcpCloseSessionRequest`. Mirrors
     /// `_closeSessionInternal`.
     pub(crate) async fn close_session_internal(
         &self,
@@ -1635,64 +1689,74 @@ impl AgentOs {
             }
         }
 
-        // Session processes live entirely inside the VM, so the only safe teardown is the sidecar
-        // `CloseAgentSession` RPC (and the `kill_process` RPC if ever added here), which targets the
-        // guest process by its in-VM session/process handle.
+        // Session processes live entirely inside the VM, so the only safe teardown is the ACP close
+        // request, which targets the guest process by its in-VM session/process handle.
         //
         // NEVER fall back to a host `kill()` here. A session/process pid is a guest/kernel display
         // PID, not a host PID. Passing it to the host signal API would SIGKILL whatever unrelated
         // host process happens to share that number -- and a negative PID kills the entire host
         // process *group* with that id. In the TypeScript client that has in practice killed the host
         // tmux session, the test launcher, and even the user systemd manager. This client holds no
-        // host handle for guest processes, so there is nothing host-side to signal; `CloseAgentSession`
-        // remains the authoritative teardown path.
+        // host handle for guest processes, so there is nothing host-side to signal; the ACP close
+        // request remains the authoritative teardown path.
         let response = self
-            .transport()
-            .request(
-                self.session_ownership(),
-                RequestPayload::CloseAgentSession(CloseAgentSessionRequest {
-                    session_id: session_id.to_string(),
-                }),
-            )
+            .send_acp_request(AcpRequest::AcpCloseSessionRequest(AcpCloseSessionRequest {
+                session_id: session_id.to_string(),
+            }))
             .await?;
         match response {
-            ResponsePayload::AgentSessionClosed(_) => Ok(()),
-            ResponsePayload::Rejected(rejected) => Err(ClientError::Kernel {
-                code: rejected.code,
-                message: rejected.message,
-            }),
-            other => Err(ClientError::Sidecar(format!(
-                "unexpected response to CloseAgentSession: {other:?}"
-            ))),
+            AcpResponse::AcpSessionClosedResponse(_) => Ok(()),
+            other => Err(unexpected_acp_response("AcpCloseSessionRequest", other)),
         }
     }
 
-    /// Get buffered session events (bounded ring), filtered by `since`/`method`. Synthetic events
-    /// use negative sequence numbers.
-    pub fn get_session_events(
+    async fn send_acp_request(
         &self,
-        session_id: &str,
-        options: GetEventsOptions,
-    ) -> std::result::Result<Vec<SequencedEvent>, ClientError> {
-        self.require_session(session_id, |entry| {
-            let ring = entry.event_ring.lock();
-            ring.iter()
-                .filter(|event| {
-                    options
-                        .since
-                        .map(|since| event.sequence_number > since)
-                        .unwrap_or(true)
-                })
-                .filter(|event| {
-                    options
-                        .method
-                        .as_ref()
-                        .map(|method| &event.notification.method == method)
-                        .unwrap_or(true)
-                })
-                .cloned()
-                .collect()
-        })
+        request: AcpRequest,
+    ) -> std::result::Result<AcpResponse, ClientError> {
+        let payload = serde_bare::to_vec(&request).map_err(|error| {
+            ClientError::Sidecar(format!("failed to encode ACP request: {error}"))
+        })?;
+        let response = self
+            .transport()
+            .request_wire(
+                self.session_ownership(),
+                wire::RequestPayload::ExtEnvelope(wire::ExtEnvelope {
+                    namespace: ACP_EXTENSION_NAMESPACE.to_string(),
+                    payload,
+                }),
+            )
+            .await?;
+        let envelope = match response {
+            wire::ResponsePayload::ExtEnvelope(envelope) => envelope,
+            wire::ResponsePayload::RejectedResponse(rejected) => {
+                return Err(ClientError::Kernel {
+                    code: rejected.code,
+                    message: rejected.message,
+                });
+            }
+            other => {
+                return Err(ClientError::Sidecar(format!(
+                    "unexpected ACP Ext response: {other:?}"
+                )));
+            }
+        };
+        if envelope.namespace != ACP_EXTENSION_NAMESPACE {
+            return Err(ClientError::Sidecar(format!(
+                "unexpected ACP Ext namespace: {}",
+                envelope.namespace
+            )));
+        }
+        let response: AcpResponse = serde_bare::from_slice(&envelope.payload).map_err(|error| {
+            ClientError::Sidecar(format!("failed to decode ACP response: {error}"))
+        })?;
+        match response {
+            AcpResponse::AcpErrorResponse(error) => Err(ClientError::Kernel {
+                code: error.code,
+                message: error.message,
+            }),
+            response => Ok(response),
+        }
     }
 
     /// Respond to a permission request. If a pending reply slot exists, resolves it and returns a
@@ -1824,26 +1888,23 @@ impl AgentOs {
         self.raw_session_send(session_id, method, params).await
     }
 
-    /// Subscribe to a session's `session/update` events. Only `session/update` notifications are
-    /// delivered. Replay-on-subscribe defaults true (buffered events replayed first), then live
-    /// events with `seq > last_delivered` per subscriber.
+    /// Subscribe to live `session/update` events. Only events emitted after subscription are
+    /// delivered.
     pub fn on_session_event(
         &self,
         session_id: &str,
     ) -> std::result::Result<SessionEventSubscription, ClientError> {
-        let (buffered, rx) = self.require_session(session_id, |entry| {
-            let ring = entry.event_ring.lock();
-            let buffered: VecDeque<SequencedEvent> = ring
-                .iter()
-                .filter(|event| should_dispatch_to_session_event_handlers(&event.notification))
-                .cloned()
-                .collect();
-            (buffered, entry.event_tx.subscribe())
-        })?;
-
-        let stream = subscribe_with_replay(buffered, rx, i64::MIN, true);
-        let mapped = futures::StreamExt::map(stream, |event| event.notification);
-        Ok((Box::pin(mapped), Subscription::noop()))
+        let rx = self.require_session(session_id, |entry| entry.event_tx.subscribe())?;
+        let stream = futures::stream::unfold(rx, move |mut rx| async move {
+            loop {
+                match rx.recv().await {
+                    Ok(notification) => return Some((notification, rx)),
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+                }
+            }
+        });
+        Ok((Box::pin(stream), Subscription::noop()))
     }
 
     /// Subscribe to permission requests raised by the session's guest agent. Requests originate
@@ -1874,9 +1935,9 @@ impl AgentOs {
         Ok((Box::pin(stream), Subscription::noop()))
     }
 
-    /// Answer a sidecar-initiated permission request (`SidecarRequestPayload::PermissionRequest`)
-    /// by fanning a [`PermissionRequest`] out to `on_permission_request` subscribers and waiting for
-    /// the reply. Mirrors TS `_handlePermissionSidecarRequest`:
+    /// Answer an ACP permission callback by fanning a [`PermissionRequest`] out to
+    /// `on_permission_request` subscribers and waiting for the reply. Mirrors TS
+    /// `_handlePermissionSidecarRequest`:
     /// - unknown session -> `error: "Session not found: <id>"`
     /// - no subscribers -> `reply: "reject"`
     /// - otherwise registers the `pending_permission_replies` slot, delivers the request, and waits
@@ -1884,9 +1945,9 @@ impl AgentOs {
     ///   removes the slot and returns `error: "Timed out waiting for permission reply: <id>"`.
     pub(crate) async fn deliver_sidecar_permission_request(
         &self,
-        request: SidecarPermissionRequest,
-    ) -> SidecarPermissionResultResponse {
-        let SidecarPermissionRequest {
+        request: PermissionRouteRequest,
+    ) -> PermissionRouteResult {
+        let PermissionRouteRequest {
             session_id,
             permission_id,
             params,
@@ -1920,18 +1981,12 @@ impl AgentOs {
         match registered {
             Ok(true) => {}
             Ok(false) => {
-                return SidecarPermissionResultResponse {
-                    permission_id,
+                return PermissionRouteResult {
                     reply: Some(permission_reply_wire(PermissionReply::Reject).to_string()),
-                    error: None,
                 };
             }
             Err(_) => {
-                return SidecarPermissionResultResponse {
-                    permission_id: permission_id.clone(),
-                    reply: None,
-                    error: Some(format!("Session not found: {session_id}")),
-                };
+                return PermissionRouteResult { reply: None };
             }
         }
 
@@ -1951,26 +2006,20 @@ impl AgentOs {
         tokio::pin!(timeout);
         tokio::select! {
             reply = slot_rx => match reply {
-                Ok(reply) => SidecarPermissionResultResponse {
-                    permission_id,
+                Ok(reply) => PermissionRouteResult {
                     reply: Some(permission_reply_wire(reply).to_string()),
-                    error: None,
                 },
                 // The slot sender dropped without a reply (session closed / replies rejected).
-                Err(_) => SidecarPermissionResultResponse {
-                    permission_id,
+                Err(_) => PermissionRouteResult {
                     reply: Some(permission_reply_wire(PermissionReply::Reject).to_string()),
-                    error: None,
                 },
             },
             _ = &mut timeout => {
                 let _ = self.require_session(&session_id, |entry| {
                     let _ = entry.pending_permission_replies.remove(&permission_id);
                 });
-                SidecarPermissionResultResponse {
-                    permission_id: permission_id.clone(),
+                PermissionRouteResult {
                     reply: None,
-                    error: Some(format!("Timed out waiting for permission reply: {permission_id}")),
                 }
             }
         }

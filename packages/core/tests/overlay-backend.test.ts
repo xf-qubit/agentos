@@ -162,7 +162,7 @@ describe("OverlayBackend (layer behavior)", () => {
 		await overlay.chmod("/data", 0o700);
 
 		expect(await overlay.readDir("/data")).toEqual([]);
-		expect(await overlay.readDir("/")).not.toContain(".agent-os-overlay");
+		expect(await overlay.readDir("/")).not.toContain(".secure-exec-overlay");
 	});
 
 	test("pread falls through to lower", async () => {

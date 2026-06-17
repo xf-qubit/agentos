@@ -94,7 +94,7 @@ describe("tool reference registration", () => {
 		};
 	}
 
-	test("stores sidecar-generated tool reference markdown on the VM", () => {
+	test("stores generated tool reference markdown on the VM", () => {
 		const toolReference = (vm as unknown as { _toolReference: string })
 			._toolReference;
 
@@ -126,9 +126,7 @@ describe("tool reference registration", () => {
 			expect(argIndex).toBeGreaterThan(-1);
 			const prompt = argv[argIndex + 1];
 			expect(prompt).toContain("## Available Host Tools");
-			expect(prompt).toContain(
-				"`agentos-math add --a <number> --b <number>`",
-			);
+			expect(prompt).toContain("`agentos-math add --a <number> --b <number>`");
 			expect(prompt).toContain("### math");
 
 			vm.closeSession(sessionId);

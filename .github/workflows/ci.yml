@@ -25,27 +25,36 @@ jobs:
         with:
           workspaces: |
             . -> target
-      - uses: actions/cache@v4
-        with:
-          path: ~/.cargo/.rusty_v8
-          key: ${{ runner.os }}-rusty-v8-${{ hashFiles('Cargo.lock', 'crates/v8-runtime/Cargo.toml', 'crates/v8-runtime/build.rs', 'crates/build-support/v8_bridge_build.rs', 'packages/core/scripts/build-v8-bridge.mjs') }}
-          restore-keys: |
-            ${{ runner.os }}-rusty-v8-
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      - run: pnpm --dir scripts/publish run check-types
+      - run: pnpm --dir scripts/publish test
+      - run: bash scripts/check-secure-exec-rust-boundary.test.sh
+      - run: bash scripts/check-secure-exec-rust-boundary.sh
+      - run: node --test scripts/check-rust-package-metadata.test.mjs
+      - run: node scripts/check-rust-package-metadata.mjs
+      - run: node --test scripts/check-stale-split-names.test.mjs
+      - run: node scripts/check-stale-split-names.mjs
+      - run: node --test scripts/check-agent-os-client-protocol-compat.test.mjs
+      - run: node scripts/check-agent-os-client-protocol-compat.mjs
+      - run: node --test scripts/check-registry-test-runtime-boundary.test.mjs
+      - run: node scripts/check-registry-test-runtime-boundary.mjs
+      - run: node --test scripts/check-registry-software-split.test.mjs
+      - run: node scripts/check-registry-software-split.mjs
+      - run: node --test scripts/check-secure-exec-package-boundary.test.mjs
+      - run: node scripts/check-secure-exec-package-boundary.mjs
       - run: cargo fmt --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test -p agent-os-v8-runtime -- --test-threads=1
-      - run: cargo test -p agent-os-v8-runtime snapshot::tests::snapshot_consolidated_tests -- --exact --ignored
-      - run: cargo test -p agent-os-execution -- --test-threads=1
+      - run: cargo test -p agent-os-protocol -- --test-threads=1
       - run: cargo test -p agent-os-sidecar -- --test-threads=1
-      - run: cargo test -p agent-os-kernel -- --test-threads=1
-      - run: cargo test -p agent-os-bridge -- --test-threads=1
+      - run: cargo test -p agent-os-sidecar-browser -- --test-threads=1
+      - run: cargo test -p agent-os-client -- --test-threads=1
       - run: pnpm check-types
       - run: pnpm lint
       - if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
         run: pnpm test
         env:
           AGENTOS_E2E_NETWORK: '1'
+          SECURE_EXEC_E2E_NETWORK: '1'
       - if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
         run: pnpm test

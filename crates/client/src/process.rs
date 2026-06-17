@@ -15,11 +15,7 @@ use scc::HashMap as SccHashMap;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, watch};
 
-use agent_os_sidecar::protocol::{
-    CloseStdinRequest, EventPayload, ExecuteRequest, KillProcessRequest, OwnershipScope,
-    ProcessSnapshotStatus, RejectedResponse, RequestPayload, ResponsePayload, StreamChannel,
-    WriteStdinRequest,
-};
+use secure_exec_client::wire::{self, EventPayload, ProcessSnapshotStatus, StreamChannel};
 
 use crate::agent_os::{AgentOs, ProcessEntry};
 use crate::command_line::resolve_exec_command;
@@ -180,7 +176,7 @@ impl AgentOs {
 
         // Subscribe to events BEFORE issuing the request so no output/exit is missed between the
         // request landing and the subscription being installed.
-        let mut events = self.transport().subscribe_events();
+        let mut events = self.transport().subscribe_wire_events();
 
         // Parse the command line into a `(command, args)` pair the same way the sidecar's
         // child_process path does: shell-free argv lists spawn directly (preserving the command's
@@ -205,9 +201,9 @@ impl AgentOs {
             let ownership = self.vm_scope();
             let _ = self
                 .transport()
-                .request(
+                .request_wire(
                     ownership,
-                    RequestPayload::WriteStdin(WriteStdinRequest {
+                    wire::RequestPayload::WriteStdinRequest(wire::WriteStdinRequest {
                         process_id: process_id.clone(),
                         chunk,
                     }),
@@ -218,9 +214,9 @@ impl AgentOs {
             let ownership = self.vm_scope();
             let _ = self
                 .transport()
-                .request(
+                .request_wire(
                     ownership,
-                    RequestPayload::CloseStdin(CloseStdinRequest {
+                    wire::RequestPayload::CloseStdinRequest(wire::CloseStdinRequest {
                         process_id: process_id.clone(),
                     }),
                 )
@@ -272,7 +268,7 @@ impl AgentOs {
                 }
             };
             match payload {
-                EventPayload::ProcessOutput(output) if output.process_id == process_id => {
+                EventPayload::ProcessOutputEvent(output) if output.process_id == process_id => {
                     match output.channel {
                         StreamChannel::Stdout => {
                             if let Some(cb) = on_stdout.as_mut() {
@@ -314,13 +310,14 @@ impl AgentOs {
                         }
                     }
                 }
-                EventPayload::ProcessExited(exited) if exited.process_id == process_id => {
+                EventPayload::ProcessExitedEvent(exited) if exited.process_id == process_id => {
                     break exited.exit_code;
                 }
-                EventPayload::ProcessOutput(_)
-                | EventPayload::ProcessExited(_)
-                | EventPayload::VmLifecycle(_)
-                | EventPayload::Structured(_) => {}
+                EventPayload::ProcessOutputEvent(_)
+                | EventPayload::ProcessExitedEvent(_)
+                | EventPayload::VmLifecycleEvent(_)
+                | EventPayload::StructuredEvent(_)
+                | EventPayload::ExtEnvelope(_) => {}
             }
         };
 
@@ -394,7 +391,7 @@ impl AgentOs {
         drop(registry_guard);
 
         // Subscribe to events before issuing the request so the pump sees everything.
-        let events = self.transport().subscribe_events();
+        let events = self.transport().subscribe_wire_events();
 
         let this = self.clone();
         let command = command.to_owned();
@@ -431,9 +428,12 @@ impl AgentOs {
             let ownership = this.vm_scope();
             let _ = this
                 .transport()
-                .request(
+                .request_wire(
                     ownership,
-                    RequestPayload::WriteStdin(WriteStdinRequest { process_id, chunk }),
+                    wire::RequestPayload::WriteStdinRequest(wire::WriteStdinRequest {
+                        process_id,
+                        chunk,
+                    }),
                 )
                 .await;
         });
@@ -448,9 +448,9 @@ impl AgentOs {
             let ownership = this.vm_scope();
             let _ = this
                 .transport()
-                .request(
+                .request_wire(
                     ownership,
-                    RequestPayload::CloseStdin(CloseStdinRequest { process_id }),
+                    wire::RequestPayload::CloseStdinRequest(wire::CloseStdinRequest { process_id }),
                 )
                 .await;
         });
@@ -560,15 +560,12 @@ impl AgentOs {
         let ownership = self.vm_scope();
         let response = self
             .transport()
-            .request(
-                ownership,
-                RequestPayload::GetProcessSnapshot(Default::default()),
-            )
+            .request_wire(ownership, wire::RequestPayload::GetProcessSnapshotRequest)
             .await
             .context("all_processes: GetProcessSnapshot request failed")?;
         let snapshot = match response {
-            ResponsePayload::ProcessSnapshot(snapshot) => snapshot,
-            ResponsePayload::Rejected(RejectedResponse { code, message }) => {
+            wire::ResponsePayload::ProcessSnapshotResponse(snapshot) => snapshot,
+            wire::ResponsePayload::RejectedResponse(wire::RejectedResponse { code, message }) => {
                 return Err(ClientError::Kernel { code, message }.into());
             }
             other => {
@@ -805,8 +802,12 @@ impl AgentOs {
     // -----------------------------------------------------------------------
 
     /// Build the VM-scoped ownership for a wire request.
-    fn vm_scope(&self) -> OwnershipScope {
-        OwnershipScope::vm(self.connection_id(), self.wire_session_id(), self.vm_id())
+    fn vm_scope(&self) -> wire::OwnershipScope {
+        wire::OwnershipScope::VmOwnership(wire::VmOwnership {
+            connection_id: self.connection_id().to_string(),
+            session_id: self.wire_session_id().to_string(),
+            vm_id: self.vm_id().to_string(),
+        })
     }
 
     /// Allocate a fresh wire `process_id` (used by `exec`, which does not register in the SDK map).
@@ -831,27 +832,27 @@ impl AgentOs {
         args: Vec<String>,
         env: BTreeMap<String, String>,
         cwd: Option<String>,
-    ) -> std::result::Result<agent_os_sidecar::protocol::ProcessStartedResponse, ClientError> {
+    ) -> std::result::Result<wire::ProcessStartedResponse, ClientError> {
         let ownership = self.vm_scope();
         let response = self
             .transport()
-            .request(
+            .request_wire(
                 ownership,
-                RequestPayload::Execute(ExecuteRequest {
+                wire::RequestPayload::ExecuteRequest(wire::ExecuteRequest {
                     process_id: process_id.to_owned(),
                     command,
                     runtime: None,
                     entrypoint: None,
                     args,
-                    env,
+                    env: env.into_iter().collect(),
                     cwd,
                     wasm_permission_tier: None,
                 }),
             )
             .await?;
         match response {
-            ResponsePayload::ProcessStarted(started) => Ok(started),
-            ResponsePayload::Rejected(RejectedResponse { code, message }) => {
+            wire::ResponsePayload::ProcessStartedResponse(started) => Ok(started),
+            wire::ResponsePayload::RejectedResponse(wire::RejectedResponse { code, message }) => {
                 Err(ClientError::Kernel { code, message })
             }
             other => Err(ClientError::Sidecar(format!(
@@ -870,9 +871,12 @@ impl AgentOs {
             let ownership = this.vm_scope();
             let _ = this
                 .transport()
-                .request(
+                .request_wire(
                     ownership,
-                    RequestPayload::KillProcess(KillProcessRequest { process_id, signal }),
+                    wire::RequestPayload::KillProcessRequest(wire::KillProcessRequest {
+                        process_id,
+                        signal,
+                    }),
                 )
                 .await;
         });
@@ -897,9 +901,12 @@ impl AgentOs {
             let ownership = this.vm_scope();
             let _ = this
                 .transport()
-                .request(
+                .request_wire(
                     ownership,
-                    RequestPayload::KillProcess(KillProcessRequest { process_id, signal }),
+                    wire::RequestPayload::KillProcessRequest(wire::KillProcessRequest {
+                        process_id,
+                        signal,
+                    }),
                 )
                 .await;
         });
@@ -960,7 +967,7 @@ impl AgentOs {
         command: String,
         args: Vec<String>,
         options: SpawnOptions,
-        mut events: broadcast::Receiver<(OwnershipScope, EventPayload)>,
+        mut events: broadcast::Receiver<(wire::OwnershipScope, EventPayload)>,
         stdout_tx: broadcast::Sender<Vec<u8>>,
         stderr_tx: broadcast::Sender<Vec<u8>>,
         exit_tx: watch::Sender<Option<i32>>,
@@ -1010,7 +1017,7 @@ impl AgentOs {
                 }
             };
             match payload {
-                EventPayload::ProcessOutput(output) if output.process_id == process_id => {
+                EventPayload::ProcessOutputEvent(output) if output.process_id == process_id => {
                     let bytes = output.chunk;
                     match output.channel {
                         StreamChannel::Stdout => {
@@ -1021,14 +1028,15 @@ impl AgentOs {
                         }
                     }
                 }
-                EventPayload::ProcessExited(exited) if exited.process_id == process_id => {
+                EventPayload::ProcessExitedEvent(exited) if exited.process_id == process_id => {
                     let _ = exit_tx.send(Some(exited.exit_code));
                     break;
                 }
-                EventPayload::ProcessOutput(_)
-                | EventPayload::ProcessExited(_)
-                | EventPayload::VmLifecycle(_)
-                | EventPayload::Structured(_) => {}
+                EventPayload::ProcessOutputEvent(_)
+                | EventPayload::ProcessExitedEvent(_)
+                | EventPayload::VmLifecycleEvent(_)
+                | EventPayload::StructuredEvent(_)
+                | EventPayload::ExtEnvelope(_) => {}
             }
         }
         let _guard = self.inner().process_registry_lock.lock();

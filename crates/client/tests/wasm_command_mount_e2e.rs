@@ -1,7 +1,7 @@
 //! Regression repro for "software descriptors don't actually mount commands into the VM".
 //!
-//! A wasm-command software package (e.g. `@rivet-dev/agent-os-coreutils/wasm`) must be mounted at
-//! `/__agentos/commands/{index}/` so the sidecar's `discover_command_guest_paths` can resolve guest
+//! A wasm-command software package (e.g. `@secure-exec/coreutils/wasm`) must be mounted at
+//! `/__secure_exec/commands/{index}/` so the sidecar's `discover_command_guest_paths` can resolve guest
 //! commands. Before the fix, `AgentOs::create` sent `ConfigureVm { mounts: Vec::new() }`, so the
 //! command directory was never mounted and `exec("echo hello")` failed with
 //! `command not found on native sidecar path: echo hello`.
@@ -38,4 +38,6 @@ async fn wasm_command_software_mounts_into_vm() {
         result.stderr
     );
     assert_eq!(result.stdout.trim_end(), "hello", "echo stdout");
+
+    os.shutdown().await.expect("shutdown");
 }

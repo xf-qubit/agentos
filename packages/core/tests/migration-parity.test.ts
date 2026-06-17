@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage } from "node:http";
 import { resolve } from "node:path";
-import common from "@rivet-dev/agent-os-common";
+import common from "@agent-os-pkgs/common";
 import { afterEach, describe, expect, test } from "vitest";
 import { z } from "zod";
 import { AgentOs, hostTool, toolKit } from "../src/index.js";
@@ -208,7 +208,7 @@ describe("native sidecar migration parity gate", () => {
 		cleanups.clear();
 	});
 
-test("covers filesystem, process execution, and reusable layer snapshots on the Rust sidecar path", async () => {
+	test("covers filesystem, process execution, and reusable layer snapshots on the Rust sidecar path", async () => {
 		const vm = await AgentOs.create({
 			software: [common],
 			permissions: {
@@ -401,10 +401,15 @@ test("covers filesystem, process execution, and reusable layer snapshots on the 
 
 		const { sessionId } = await vm.createSession("migration-parity");
 
+		const events: { method: string; params?: unknown }[] = [];
+		const unsubscribeEvents = vm.onSessionEvent(sessionId, (event) => {
+			events.push(event);
+		});
 		const { response, text } = await vm.prompt(
 			sessionId,
 			"Run the migration parity prompt flow.",
 		);
+		unsubscribeEvents();
 
 		expect(response.error).toBeUndefined();
 		expect((response.result as { stopReason?: string }).stopReason).toBe(
@@ -412,9 +417,6 @@ test("covers filesystem, process execution, and reusable layer snapshots on the 
 		);
 		expect(text).toContain("mock-parity-flow-ok");
 
-		const events = vm
-			.getSessionEvents(sessionId)
-			.map((entry) => entry.notification);
 		expect(
 			events.some(
 				(event) =>

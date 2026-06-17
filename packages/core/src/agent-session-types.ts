@@ -73,13 +73,3 @@ export interface SessionInitData {
 	capabilities?: AgentCapabilities;
 	agentInfo?: AgentInfo;
 }
-
-export interface SequencedEvent {
-	sequenceNumber: number;
-	notification: JsonRpcNotification;
-}
-
-export interface GetEventsOptions {
-	since?: number;
-	method?: string;
-}

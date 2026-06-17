@@ -4,7 +4,7 @@
 // agent runtime. It may not complete in all environments.
 
 import claude from "@rivet-dev/agent-os-claude";
-import common from "@rivet-dev/agent-os-common";
+import common from "@agent-os-pkgs/common";
 import type { SoftwareInput } from "@rivet-dev/agent-os-core";
 import { AgentOs } from "@rivet-dev/agent-os-core";
 import opencode from "@rivet-dev/agent-os-opencode";

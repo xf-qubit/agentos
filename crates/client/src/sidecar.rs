@@ -4,17 +4,15 @@
 //! Ported from `packages/core/src/agent-os.ts` (`AgentOsSidecar`). The shared-sidecar pool is a
 //! process-global map (default pool `"default"`).
 
+use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
 use once_cell::sync::OnceCell;
 use scc::HashMap as SccHashMap;
 use serde::Serialize;
 use uuid::Uuid;
 
-use agent_os_sidecar::protocol::{
-    AuthenticateRequest, OwnershipScope, RequestPayload, ResponsePayload,
-};
+use secure_exec_client::wire;
 
 use crate::agent_os::AgentOs;
 use crate::error::ClientError;
@@ -22,6 +20,9 @@ use crate::transport::SidecarTransport;
 
 /// Maximum shared sidecar pool entries retained process-wide.
 const SHARED_SIDECAR_POOL_LIMIT: usize = 1024;
+
+/// Env var that overrides the Agent OS wrapper sidecar binary path.
+const AGENT_OS_SIDECAR_BIN_ENV: &str = "AGENT_OS_SIDECAR_BIN";
 
 /// The lazily-established shared sidecar process + authenticated connection. Multiple VMs in the same
 /// (shared) sidecar reuse this single process/connection, each opening its own session + VM on it.
@@ -112,9 +113,9 @@ pub struct AgentOsSidecar {
     pub(crate) shared_pool: Option<String>,
     pub(crate) state: AtomicU8,
     pub(crate) active_vm_count: AtomicU32,
-    /// Absolute path to the `agent-os-sidecar` binary, threaded from
-    /// `AgentOsConfig` (resolved from the npm package on the TS side) and passed
-    /// to `SidecarTransport::spawn` instead of relying on a process-global env.
+    /// Absolute path to the `agent-os-sidecar` binary, threaded from `AgentOsConfig` when present.
+    /// Otherwise `ensure_connection` resolves the Agent OS env fallback and passes an explicit path
+    /// to the generic transport.
     pub(crate) sidecar_binary_path: Option<String>,
     /// The shared sidecar process + authenticated connection, established on the first VM `create`
     /// against this sidecar and reused by every subsequent VM in the same (shared) sidecar.
@@ -149,7 +150,7 @@ impl AgentOsSidecar {
     ) -> Result<(Arc<SidecarTransport>, String, usize), ClientError> {
         let mut guard = self.connection.lock().await;
         if let Some(existing) = guard.as_ref() {
-            let max_frame = existing.transport.max_frame_bytes.load(Ordering::SeqCst);
+            let max_frame = existing.transport.max_frame_bytes();
             return Ok((
                 existing.transport.clone(),
                 existing.connection_id.clone(),
@@ -157,20 +158,23 @@ impl AgentOsSidecar {
             ));
         }
 
-        let transport = SidecarTransport::spawn(self.sidecar_binary_path.clone()).await?;
+        let transport = SidecarTransport::spawn(Some(self.resolved_sidecar_binary_path())).await?;
         let authed = match transport
-            .request(
-                OwnershipScope::connection("client-hint"),
-                RequestPayload::Authenticate(AuthenticateRequest {
+            .request_wire(
+                wire::OwnershipScope::ConnectionOwnership(wire::ConnectionOwnership {
+                    connection_id: "client-hint".to_string(),
+                }),
+                wire::RequestPayload::AuthenticateRequest(wire::AuthenticateRequest {
                     client_name: "agent-os-client".to_string(),
                     auth_token: "agent-os-client".to_string(),
+                    protocol_version: wire::PROTOCOL_VERSION,
                     bridge_version: agent_os_bridge::bridge_contract().version,
                 }),
             )
             .await?
         {
-            ResponsePayload::Authenticated(authed) => authed,
-            ResponsePayload::Rejected(rejected) => {
+            wire::ResponsePayload::AuthenticatedResponse(authed) => authed,
+            wire::ResponsePayload::RejectedResponse(rejected) => {
                 return Err(ClientError::Kernel {
                     code: rejected.code,
                     message: rejected.message,
@@ -183,7 +187,7 @@ impl AgentOsSidecar {
             }
         };
         let max_frame = authed.max_frame_bytes as usize;
-        transport.max_frame_bytes.store(max_frame, Ordering::SeqCst);
+        transport.set_max_frame_bytes(max_frame);
 
         *guard = Some(SharedConnection {
             transport: transport.clone(),
@@ -197,10 +201,15 @@ impl AgentOsSidecar {
     /// entries are never dropped, so `kill_on_drop` alone would not fire at process exit).
     pub(crate) async fn kill_connection(&self) {
         if let Some(connection) = self.connection.lock().await.take() {
-            if let Some(mut child) = connection.transport.child.lock().take() {
-                let _ = child.start_kill();
-            }
+            connection.transport.kill_child();
         }
+    }
+
+    fn resolved_sidecar_binary_path(&self) -> String {
+        self.sidecar_binary_path
+            .clone()
+            .or_else(|| std::env::var(AGENT_OS_SIDECAR_BIN_ENV).ok())
+            .unwrap_or_else(|| "agent-os-sidecar".to_string())
     }
 
     /// Snapshot the sidecar's current state. SYNC.
@@ -367,7 +376,9 @@ impl AgentOs {
         let placement = AgentOsSidecarPlacement::Explicit {
             sidecar_id: sidecar_id.clone(),
         };
-        Ok(Arc::new(AgentOsSidecar::new(sidecar_id, placement, None, None)))
+        Ok(Arc::new(AgentOsSidecar::new(
+            sidecar_id, placement, None, None,
+        )))
     }
 
     /// Get (or create) a pooled shared sidecar. Pool defaults to `"default"`. Uses the process-global
@@ -437,6 +448,9 @@ impl AgentOs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn shared(pool: &str, state: SidecarState) -> Arc<AgentOsSidecar> {
         let sidecar = Arc::new(AgentOsSidecar::new(
@@ -449,6 +463,59 @@ mod tests {
         ));
         sidecar.state.store(state.as_u8(), Ordering::SeqCst);
         sidecar
+    }
+
+    #[test]
+    fn sidecar_binary_path_prefers_explicit_wrapper_path() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let previous = std::env::var(AGENT_OS_SIDECAR_BIN_ENV).ok();
+        std::env::set_var(AGENT_OS_SIDECAR_BIN_ENV, "/tmp/from-env");
+        let sidecar = AgentOsSidecar::new(
+            "explicit-test",
+            AgentOsSidecarPlacement::Explicit {
+                sidecar_id: "explicit-test".to_string(),
+            },
+            None,
+            Some("/tmp/from-config".to_string()),
+        );
+
+        assert_eq!(sidecar.resolved_sidecar_binary_path(), "/tmp/from-config");
+
+        restore_env(AGENT_OS_SIDECAR_BIN_ENV, previous);
+    }
+
+    #[test]
+    fn sidecar_binary_path_uses_agent_os_env_fallback() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let previous = std::env::var(AGENT_OS_SIDECAR_BIN_ENV).ok();
+        std::env::set_var(AGENT_OS_SIDECAR_BIN_ENV, "/tmp/agent-os-sidecar");
+        let sidecar = shared("env-test", SidecarState::Ready);
+
+        assert_eq!(
+            sidecar.resolved_sidecar_binary_path(),
+            "/tmp/agent-os-sidecar"
+        );
+
+        restore_env(AGENT_OS_SIDECAR_BIN_ENV, previous);
+    }
+
+    #[test]
+    fn sidecar_binary_path_defaults_to_agent_os_wrapper() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let previous = std::env::var(AGENT_OS_SIDECAR_BIN_ENV).ok();
+        std::env::remove_var(AGENT_OS_SIDECAR_BIN_ENV);
+        let sidecar = shared("default-test", SidecarState::Ready);
+
+        assert_eq!(sidecar.resolved_sidecar_binary_path(), "agent-os-sidecar");
+
+        restore_env(AGENT_OS_SIDECAR_BIN_ENV, previous);
+    }
+
+    fn restore_env(key: &str, value: Option<String>) {
+        match value {
+            Some(value) => std::env::set_var(key, value),
+            None => std::env::remove_var(key),
+        }
     }
 
     #[test]

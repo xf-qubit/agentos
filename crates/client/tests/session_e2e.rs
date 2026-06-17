@@ -6,15 +6,15 @@
 //!
 //! When a session CAN be created the suite asserts the real TS contract: the session appears in
 //! `list_sessions`, `prompt` returns a `PromptResult` (response + accumulated agent text),
-//! `get_session_events` exposes the bounded event ring, `on_session_event` streams `session/update`
-//! notifications, and `close_session` removes the session (later prompts report SessionNotFound).
+//! `on_session_event` streams live `session/update` notifications, and `close_session` removes the
+//! session (later prompts report SessionNotFound).
 
 mod common;
 
 use std::collections::BTreeMap;
 
 use agent_os_client::fs::FileContent;
-use agent_os_client::{AgentOs, ClientError, CreateSessionOptions, GetEventsOptions};
+use agent_os_client::{AgentOs, ClientError, CreateSessionOptions};
 use futures::StreamExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -82,12 +82,6 @@ async fn try_create_session_with_options(
     }
 }
 
-fn session_update_kind(notification: &agent_os_client::JsonRpcNotification) -> Option<&str> {
-    let params = notification.params.as_ref()?;
-    let update = params.get("update").unwrap_or(params);
-    update.get("sessionUpdate").and_then(|value| value.as_str())
-}
-
 fn agent_message_chunk_text(notification: &agent_os_client::JsonRpcNotification) -> Option<&str> {
     let params = notification.params.as_ref()?;
     let update = params.get("update").unwrap_or(params);
@@ -134,13 +128,6 @@ async fn session_surface_create_prompt_events_close() {
             .iter()
             .any(|a| a.id == "pi" && a.acp_adapter == "@rivet-dev/agent-os-pi"),
         "list_agents must include the pi agent config"
-    );
-    assert!(
-        matches!(
-            os.resume_session("nope"),
-            Err(ClientError::SessionNotFound(_))
-        ),
-        "resume_session(unknown) must return SessionNotFound"
     );
     assert!(
         matches!(
@@ -217,21 +204,6 @@ async fn session_surface_create_prompt_events_close() {
     );
 
     // --- on_session_event: subscribe before prompting so prompt-time chunks are observed ---------
-    let updates_before_prompt = os
-        .get_session_events(
-            &session_id,
-            GetEventsOptions {
-                method: Some("session/update".to_string()),
-                ..Default::default()
-            },
-        )
-        .expect("get_session_events before prompt");
-    assert!(
-        updates_before_prompt
-            .iter()
-            .all(|event| session_update_kind(&event.notification) != Some("agent_message_chunk")),
-        "create_session should not replay prompt agent_message_chunk events before prompting"
-    );
     let (mut events, _sub) = os
         .on_session_event(&session_id)
         .expect("on_session_event for live session");
@@ -250,8 +222,8 @@ async fn session_surface_create_prompt_events_close() {
         result.response.error
     );
 
-    // Ignore any replayed non-prompt session/update events from create_session. The first
-    // agent_message_chunk must arrive live because the subscription was created before prompt.
+    // The first agent_message_chunk must arrive live because the subscription was created before
+    // prompt.
     let live_chunk_text = tokio::time::timeout(std::time::Duration::from_secs(5), async {
         while let Some(notification) = events.next().await {
             if let Some(text) = agent_message_chunk_text(&notification) {
@@ -265,22 +237,13 @@ async fn session_surface_create_prompt_events_close() {
     .flatten();
     assert!(
         !result.text.is_empty(),
-        "prompt should accumulate agent_message_chunk text from hydrated session events"
+        "prompt should accumulate agent_message_chunk text from live session events"
     );
     assert!(
         live_chunk_text
             .as_deref()
             .is_some_and(|text| !text.is_empty()),
         "on_session_event should stream a live agent_message_chunk during prompt"
-    );
-
-    // --- get_session_events: the bounded ring exposes recorded notifications ----------------------
-    let recorded = os
-        .get_session_events(&session_id, Default::default())
-        .expect("get_session_events");
-    assert!(
-        !recorded.is_empty(),
-        "prompting should have recorded at least one sequenced event"
     );
 
     // --- close_session: removes the session; later prompts report SessionNotFound -----------------

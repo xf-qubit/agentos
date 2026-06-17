@@ -8,7 +8,9 @@
 //!
 //! The client spawns the native `agent-os-sidecar` binary and speaks the existing framed BARE
 //! protocol over its stdio (see [`transport`]). It does NOT embed the kernel in-process and does NOT
-//! define a new wire protocol; all wire types are reused from `agent_os_sidecar::protocol`.
+//! define a new sidecar wire protocol. The generated Secure Exec schema surface comes from
+//! `secure_exec_client::wire`; Agent OS layers ACP/session semantics on top of those generated wire
+//! frames through the wrapper client.
 //!
 //! See the companion design docs in `~/.agents/specs/rust-client-sdk/` (ADR-001, spec, reference,
 //! checklist) for the architecture, type-mapping, error taxonomy, and streaming model.
@@ -36,9 +38,6 @@ pub const ACP_PROTOCOL_VERSION: u64 = 1;
 
 /// Per-request permission timeout (milliseconds).
 pub const PERMISSION_TIMEOUT_MS: u64 = 120_000;
-
-/// Bounded session event ring capacity.
-pub const ACP_SESSION_EVENT_RETENTION_LIMIT: usize = 1024;
 
 /// Bounded closed-session-id set capacity (for `close_session` idempotence).
 pub const CLOSED_SESSION_ID_RETENTION_LIMIT: usize = 2048;
@@ -88,14 +87,12 @@ pub use shell::{ConnectTerminalOptions, OpenShellOptions, ShellHandle};
 
 pub use session::{
     AgentCapabilities, AgentInfo, AgentRegistryEntry, ConfigAllowedValue, CreateSessionOptions,
-    GetEventsOptions, McpServerConfig, PermissionReply, PermissionRequest, PromptCapabilities,
-    PromptResult, SessionConfigOption, SessionId, SessionInfo, SessionInitData, SessionMode,
-    SessionModeState,
+    McpServerConfig, PermissionReply, PermissionRequest, PromptCapabilities, PromptResult,
+    SessionConfigOption, SessionId, SessionInfo, SessionInitData, SessionMode, SessionModeState,
 };
 
 pub use json_rpc::{
     AcpTimeoutErrorData, JsonRpcError, JsonRpcId, JsonRpcNotification, JsonRpcResponse,
-    SequencedEvent,
 };
 
 pub use cron::{

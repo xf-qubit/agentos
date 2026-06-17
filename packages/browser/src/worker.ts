@@ -1493,7 +1493,7 @@ function createBrowserProcess(): Record<string, unknown> {
 		emit() {
 			return false;
 		},
-		__agentOsRefreshProcess(nextConfig?: Record<string, unknown>) {
+		__secureExecRefreshProcess(nextConfig?: Record<string, unknown>) {
 			clearStdinListeners();
 			stdinData = typeof nextConfig?.stdin === "string" ? nextConfig.stdin : "";
 			stdinPosition = 0;
@@ -1543,7 +1543,7 @@ function getRuntimeProcess(): Record<string, unknown> | undefined {
 
 function refreshRuntimeProcess(): void {
 	const proc = getRuntimeProcess();
-	const refresh = proc?.__agentOsRefreshProcess as
+	const refresh = proc?.__secureExecRefreshProcess as
 		| ((nextConfig?: Record<string, unknown> | null) => void)
 		| undefined;
 	if (typeof refresh === "function") {
@@ -1807,6 +1807,13 @@ self.onmessage = async (event: MessageEvent<BrowserWorkerRequestMessage>) => {
 			);
 			postResponse({ type: "response", id: message.id, ok: true, result });
 			return;
+		}
+		if (message.type === "extension") {
+			const error = new Error(
+				`Browser worker extension dispatch is not implemented for namespace ${message.payload.namespace}`,
+			) as Error & { code?: string };
+			error.code = "ERR_SECURE_EXEC_BROWSER_EXTENSION_UNSUPPORTED";
+			throw error;
 		}
 		if (message.type === "dispose") {
 			postResponse({

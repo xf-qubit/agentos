@@ -1,3 +1,3 @@
-import codexSoftware from "@rivet-dev/agent-os-codex";
+import codexSoftware from "@agent-os-pkgs/codex";
 
 export default codexSoftware;

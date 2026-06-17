@@ -2,9 +2,9 @@
 
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
-import common from "@rivet-dev/agent-os-common";
+import common from "@agent-os-pkgs/common";
 import { AgentOs } from "@rivet-dev/agent-os-core";
-import git from "@rivet-dev/agent-os-git";
+import git from "@agent-os-pkgs/git";
 
 type ExecResult = {
 	stdout: string;

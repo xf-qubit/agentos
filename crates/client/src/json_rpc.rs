@@ -67,11 +67,3 @@ pub struct JsonRpcNotification {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub params: Option<Value>,
 }
-
-/// A sequenced session notification. Synthetic events use NEGATIVE sequence numbers.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SequencedEvent {
-    #[serde(rename = "sequenceNumber")]
-    pub sequence_number: i64,
-    pub notification: JsonRpcNotification,
-}
