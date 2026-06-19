@@ -1,0 +1,9 @@
+# The website Dockerfile builds the Astro site from the repo-root build context
+# (Railway default). Narrow that context to website/ so the monorepo isn't sent
+# to the builder. scripts/ralph/Dockerfile is a codex dev image that COPYs
+# nothing from the repo, so this doesn't affect it.
+*
+!website
+website/node_modules
+website/dist
+website/.astro
