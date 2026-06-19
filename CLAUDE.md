@@ -26,7 +26,14 @@ Agent OS is the agent-facing wrapper around secure-exec. It provides ACP session
 ## Website And Docs
 
 - The Agent OS website and docs live in `website/` (Astro + Starlight) and deploy to `agentos-sdk.dev` (docs at `agentos-sdk.dev/docs`). The marketing pages and docs were migrated out of `rivet.dev/agent-os` and `rivet.dev/docs/agent-os`, which now 301-redirect to this domain.
+- Docs styling is owned by the shared **`@rivet-dev/docs-theme`** repo (`github.com/rivet-dev/docs-theme`), consumed via `github:rivet-dev/docs-theme#<tag>` and wired in via `...docsTheme(starlight, siteConfig)`. To change any docs styling (palette, header, sidebar, code blocks, fonts), edit that repo and follow its CLAUDE.md release workflow — never restyle docs in `website/src`. This site owns only content + `website/docs.config.mjs` (sidebar icons via each item's `attrs['data-icon']`).
 - The core quickstart under `examples/quickstart/` and the RivetKit example must stay behaviorally identical.
 - Every quickstart change needs a matching automated test in the same change.
 - Confirm the docs repo path with the user before editing Agent OS docs.
 - Keep `website/src/data/registry.ts` current when package names or registry entries change.
+
+## Testing
+
+- Auto-skip expensive resource-saturation tests. A test that proves the *absence* of a bound by actually saturating a resource — a JS/WASM infinite loop pinning a CPU core for the watchdog window, a heap/alloc bomb, a fork bomb, or anything that aborts the process — must be marked `#[ignore = "expensive: <resource> saturation; run with --ignored"]` (vitest: `it.skip` or an env gate). These pin cores or crash the runner and bog down normal runs.
+- Still test the expensive safeguards. A configured limit/watchdog/quota actually firing — CPU-time limit set → runaway terminated; WASM fuel set → exit 124; heap cap → bounded; fd/process/socket cap → denied — is bounded and fast because the safeguard ends it. Keep these in the default suite; they are the regression guard that the protection works.
+- Rule of thumb: if the test ends only when a timeout/watchdog whose *absence* you are documenting fires (slow, unbounded) → `#[ignore]`. If it ends because a *safeguard* fires (fast, bounded) → keep it running.
