@@ -73,6 +73,19 @@ export interface AgentSoftwareDescriptor extends SoftwareDescriptor {
 		acpAdapter: string;
 		/** npm package name of the agent CLI. Must be in requires. */
 		agentPackage: string;
+		/**
+		 * Whether to evaluate this agent's SDK into the per-sidecar V8 heap
+		 * snapshot so it is loaded once per sidecar and reused across sessions
+		 * (instead of re-evaluated on every `createSession`). Opt-in: the agent's
+		 * SDK must be **snapshot-safe** — its module-init must not create native
+		 * (`.node` addon / WASM / External) handles, open fds/sockets, start
+		 * timers, read per-session config, or leave pending promises. SDKs that
+		 * are not snapshot-safe (or where snapshot creation fails) automatically
+		 * fall back to the per-session dynamic-import path, so this flag is a
+		 * safety/performance switch, not a correctness requirement. Defaults to
+		 * `false`. See the Custom Agents / dependencies docs for the full rules.
+		 */
+		snapshot?: boolean;
 		/** Static env vars passed when spawning the adapter. */
 		staticEnv?: Record<string, string>;
 		/** Dynamic env vars computed at boot time. */
@@ -523,6 +536,12 @@ export function processSoftware(software: SoftwareInput[]): ProcessedSoftware {
 		if (!isTypedDescriptor(pkg)) {
 			// Duck-typed: any object with commandDir is a WASM command source.
 			const commandMetadata = collectCommandMetadata(pkg);
+			if (!existsSync(commandMetadata.commandDir)) {
+				console.warn(
+					`[agentos] skipping WASM command source with missing commandDir: ${commandMetadata.commandDir} (build its wasm artifacts to enable these commands)`,
+				);
+				continue;
+			}
 			commandDirs.push(commandMetadata.commandDir);
 			commandPackages.push(commandMetadata);
 			collectRegistryPackagePermissions(commandPermissions, pkg);
@@ -532,6 +551,12 @@ export function processSoftware(software: SoftwareInput[]): ProcessedSoftware {
 		switch (pkg.type) {
 			case "wasm-commands": {
 				const commandMetadata = collectCommandMetadata(pkg);
+				if (!existsSync(commandMetadata.commandDir)) {
+					console.warn(
+						`[agentos] skipping WASM command source with missing commandDir: ${commandMetadata.commandDir} (build its wasm artifacts to enable these commands)`,
+					);
+					break;
+				}
 				commandDirs.push(commandMetadata.commandDir);
 				commandPackages.push(commandMetadata);
 				collectTypedDescriptorPermissions(commandPermissions, pkg);
