@@ -53,6 +53,7 @@ const docsHref =
 				: null;
 
 const configId = entry.status === "config" ? entry.configId : null;
+const agentId = entry.status === "docs" ? (entry.agentId ?? null) : null;
 
 // The code example shown on the page. Config entries carry their own; software
 // and sandbox-mounting entries get an auto-generated registration example.
@@ -83,6 +84,20 @@ const vm = agentOS({
 });
 
 export const registry = setup({ use: { vm } });`;
+} else if (isDocs && entry.status === "docs" && entry.package && entry.agentId) {
+	// Built-in agent adapter: register it as VM software, then open a session
+	// with its agent id. The import identifier matches the agent id (e.g.
+	// `import claude from "@agentos-software/claude-code"`).
+	exampleSource = `import { agentOS, setup } from "@rivet-dev/agentos";
+import ${entry.agentId} from "${entry.package}";
+
+// Register the ${entry.title} adapter as VM software
+const vm = agentOS({ software: [${entry.agentId}] });
+
+export const registry = setup({ use: { vm } });
+
+// Then start a session from your client with the "${entry.agentId}" agent id:
+// const session = await agent.createSession("${entry.agentId}", { env: { /* API keys */ } });`;
 }
 const exampleHtml = exampleSource
 	? await highlightCodeHtml(exampleSource, "ts")
@@ -160,10 +175,24 @@ const EntryIcon = entry.icon ? REGISTRY_ICONS[entry.icon] : undefined;
 			) : isDocs ? (
 				<>
 					<section>
-						<h2 class="mb-3 text-xl font-medium text-ink">Documentation</h2>
-						<p class="mb-6 text-sm text-ink-soft">
-							Built into agentOS — no separate install. See the docs for setup and usage.
+						<h2 class="mb-3 text-xl font-medium text-ink">{exampleHtml ? "Add to agentOS" : "Documentation"}</h2>
+						<p class="mb-4 text-sm text-ink-soft">
+							{exampleHtml && agentId ? (
+								<>
+									Register the {entry.title} adapter as your VM's{" "}
+									<code class="rounded bg-ink/5 px-1.5 py-0.5 font-mono text-[13px] text-ink">software: []</code>, then open a session with the{" "}
+									<code class="rounded bg-ink/5 px-1.5 py-0.5 font-mono text-[13px] text-ink">{agentId}</code>{" "}
+									agent id.
+								</>
+							) : (
+								"Built into agentOS — no separate install. See the docs for setup and usage."
+							)}
 						</p>
+						{exampleHtml && (
+							<InkPanel className="mb-6">
+								<div class="overflow-x-auto px-5 py-4 font-mono text-[13px] leading-relaxed" set:html={exampleHtml} />
+							</InkPanel>
+						)}
 					</section>
 
 					<a

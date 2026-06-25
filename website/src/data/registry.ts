@@ -29,6 +29,11 @@ export interface RegistryEntryDocs extends RegistryEntryBase {
 	status: "docs";
 	// Link to the docs page documenting this entry.
 	docsHref: string;
+	// For built-in agent adapters: the npm software package that provides the
+	// adapter and the session agent id. Used to render a usage example on the
+	// registry page before linking out to the docs.
+	package?: string;
+	agentId?: string;
 }
 
 // A built-in capability configured inline (e.g. a filesystem mount plugin),
@@ -68,6 +73,8 @@ export const registry: RegistryEntry[] = [
 		title: "Claude Code",
 		status: "docs",
 		docsHref: "/docs/agents/claude",
+		package: "@agentos-software/claude-code",
+		agentId: "claude",
 		description:
 			"Run Claude Code as an agentOS agent with full tool access, file editing, and shell execution.",
 		types: ["agent"],
@@ -78,6 +85,8 @@ export const registry: RegistryEntry[] = [
 		title: "Codex",
 		status: "docs",
 		docsHref: "/docs/agents/codex",
+		package: "@agentos-software/codex",
+		agentId: "codex",
 		description:
 			"Run OpenAI's Codex coding agent inside agentOS with programmatic API access.",
 		types: ["agent"],
@@ -88,6 +97,8 @@ export const registry: RegistryEntry[] = [
 		title: "OpenCode",
 		status: "docs",
 		docsHref: "/docs/agents/opencode",
+		package: "@agentos-software/opencode",
+		agentId: "opencode",
 		description:
 			"Run OpenCode, an open-source coding agent, inside agentOS.",
 		types: ["agent"],
