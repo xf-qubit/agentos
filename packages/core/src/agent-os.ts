@@ -242,12 +242,15 @@ import {
 	NativeSidecarKernelProxy,
 	SidecarProcess,
 	type RootFilesystemEntry,
+	type SidecarMountDescriptor,
+	type SidecarPermissionsPolicy,
 	type SidecarRegisteredHostCallbackDefinition,
 	type SidecarRequestFrame,
 	type SidecarResponsePayload,
 	type SidecarSessionState,
 	serializeRootFilesystemForSidecar,
 } from "./sidecar/rpc-client.js";
+import type { PermissionTier } from "./runtime.js";
 
 export interface AgentOsSharedSidecarOptions {
 	pool?: string;
@@ -292,6 +295,10 @@ interface AgentOsVmAdmin extends InProcessSidecarVmAdmin {
 	hostMounts: HostMountInfo[];
 	env: Record<string, string>;
 	permissions: Permissions;
+	sidecarMounts: SidecarMountDescriptor[];
+	sidecarPermissions: SidecarPermissionsPolicy | undefined;
+	commandPermissions: Record<string, PermissionTier>;
+	loopbackExemptPorts: number[] | undefined;
 	sidecarClient: SidecarProcess;
 	sidecarSession: AuthenticatedSession;
 	sidecarVm: CreatedVm;
@@ -1673,6 +1680,16 @@ function collectSidecarMountPlan(options: {
 
 	for (const mount of options.mounts ?? []) {
 		if (!isNativeMountConfig(mount)) {
+			sidecarMounts.push({
+				guestPath: mount.path,
+				readOnly: isOverlayMountConfig(mount)
+					? (mount.filesystem.mode ?? "ephemeral") === "read-only"
+					: (mount.readOnly ?? false),
+				plugin: {
+					id: "js_bridge",
+					config: {},
+				},
+			});
 			continue;
 		}
 		pushMount(mount);
@@ -2035,6 +2052,177 @@ interface HostCallbackContext {
 	toolMap: ReadonlyMap<string, HostTool>;
 	permissions: Permissions;
 	readFile(path: string): Promise<Uint8Array>;
+}
+
+interface JsBridgeContext {
+	filesystem: VirtualFileSystem;
+}
+
+function bridgeErrorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+function toBridgeArgs(value: unknown): Record<string, unknown> {
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		throw new Error("js_bridge args must be an object");
+	}
+	return value as Record<string, unknown>;
+}
+
+function bridgePath(mountId: string, value: unknown): string {
+	if (!mountId.startsWith("/")) {
+		throw new Error(`Unsupported js_bridge mount id: ${mountId}`);
+	}
+	if (typeof value !== "string") {
+		throw new Error("js_bridge path argument must be a string");
+	}
+	return posixPath.normalize(posixPath.join(mountId, value));
+}
+
+function requireBridgeNumber(value: unknown, field: string): number {
+	if (typeof value !== "number" || !Number.isFinite(value)) {
+		throw new Error(`js_bridge args.${field} must be a number`);
+	}
+	return value;
+}
+
+function decodeBridgeBytes(value: unknown, field: string): Uint8Array {
+	if (typeof value === "string") {
+		return new Uint8Array(Buffer.from(value, "base64"));
+	}
+	if (
+		Array.isArray(value) &&
+		value.every((entry) => Number.isInteger(entry) && entry >= 0 && entry <= 255)
+	) {
+		return new Uint8Array(value);
+	}
+	throw new Error(`js_bridge args.${field} must be base64 bytes`);
+}
+
+async function handleJsBridgeCall(
+	request: Extract<
+		SidecarRequestFrame["payload"],
+		{ type: "js_bridge_call" }
+	>,
+	context: JsBridgeContext,
+): Promise<SidecarResponsePayload> {
+	try {
+		const args = toBridgeArgs(request.args);
+		const fs = context.filesystem;
+		const path = () => bridgePath(request.mount_id, args.path);
+		let result: unknown;
+
+		switch (request.operation) {
+			case "readFile":
+				result = Buffer.from(await fs.readFile(path())).toString("base64");
+				break;
+			case "readDir":
+				result = await fs.readDir(path());
+				break;
+			case "readDirWithTypes":
+				result = await fs.readDirWithTypes(path());
+				break;
+			case "writeFile":
+				await fs.writeFile(path(), decodeBridgeBytes(args.content, "content"));
+				break;
+			case "createDir":
+				await fs.createDir(path());
+				break;
+			case "mkdir":
+				await fs.mkdir(path(), { recursive: args.recursive !== false });
+				break;
+			case "exists":
+				result = await fs.exists(path());
+				break;
+			case "stat":
+				result = await fs.stat(path());
+				break;
+			case "removeFile":
+				await fs.removeFile(path());
+				break;
+			case "removeDir":
+				await fs.removeDir(path());
+				break;
+			case "rename":
+				await fs.rename(
+					bridgePath(request.mount_id, args.oldPath),
+					bridgePath(request.mount_id, args.newPath),
+				);
+				break;
+			case "realpath":
+				result = await fs.realpath(path());
+				break;
+			case "symlink": {
+				if (typeof args.target !== "string") {
+					throw new Error("js_bridge args.target must be a string");
+				}
+				await fs.symlink(args.target, bridgePath(request.mount_id, args.linkPath));
+				break;
+			}
+			case "readlink":
+				result = await fs.readlink(path());
+				break;
+			case "lstat":
+				result = await fs.lstat(path());
+				break;
+			case "link":
+				await fs.link(
+					bridgePath(request.mount_id, args.oldPath),
+					bridgePath(request.mount_id, args.newPath),
+				);
+				break;
+			case "chmod":
+				await fs.chmod(path(), requireBridgeNumber(args.mode, "mode"));
+				break;
+			case "chown":
+				await fs.chown(
+					path(),
+					requireBridgeNumber(args.uid, "uid"),
+					requireBridgeNumber(args.gid, "gid"),
+				);
+				break;
+			case "utimes":
+				await fs.utimes(
+					path(),
+					requireBridgeNumber(args.atimeMs, "atimeMs"),
+					requireBridgeNumber(args.mtimeMs, "mtimeMs"),
+				);
+				break;
+			case "truncate":
+				await fs.truncate(path(), requireBridgeNumber(args.length, "length"));
+				break;
+			case "pread":
+				result = Buffer.from(
+					await fs.pread(
+						path(),
+						requireBridgeNumber(args.offset, "offset"),
+						requireBridgeNumber(args.length, "length"),
+					),
+				).toString("base64");
+				break;
+			case "pwrite":
+				await fs.pwrite(
+					path(),
+					requireBridgeNumber(args.offset, "offset"),
+					decodeBridgeBytes(args.content, "content"),
+				);
+				break;
+			default:
+				throw new Error(`Unsupported js_bridge operation: ${request.operation}`);
+		}
+
+		return {
+			type: "js_bridge_result",
+			call_id: request.call_id,
+			...(result === undefined ? {} : { result }),
+		};
+	} catch (error) {
+		return {
+			type: "js_bridge_result",
+			call_id: request.call_id,
+			error: bridgeErrorMessage(error),
+		};
+	}
 }
 
 function parseHostCommandCallbackInput(
@@ -2489,6 +2677,7 @@ export class AgentOs {
 	private _hostMounts: HostMountInfo[];
 	private _env: Record<string, string>;
 	private _rootFilesystem: VirtualFileSystem;
+	private readonly _additionalInstructions: string | undefined;
 	private _sidecarLease: AgentOsSidecarVmLease<AgentOsVmAdmin> | null = null;
 	private readonly _sidecarClient: SidecarProcess;
 	private readonly _sidecarSession: AuthenticatedSession;
@@ -2507,6 +2696,7 @@ export class AgentOs {
 		sidecarClient: SidecarProcess,
 		sidecarSession: AuthenticatedSession,
 		sidecarVm: CreatedVm,
+		additionalInstructions?: string,
 		agentStderrHandler?: AgentStderrHandler,
 	) {
 		this.#kernel = kernel;
@@ -2519,6 +2709,7 @@ export class AgentOs {
 		this._sidecarClient = sidecarClient;
 		this._sidecarSession = sidecarSession;
 		this._sidecarVm = sidecarVm;
+		this._additionalInstructions = additionalInstructions;
 		this._agentStderrHandler = agentStderrHandler;
 		this._disposeSidecarEventListener = this._sidecarClient.onEvent((event) => {
 			this._handleSidecarEvent(event);
@@ -2693,6 +2884,10 @@ export class AgentOs {
 					env,
 					cwd: "/workspace",
 					localMounts,
+					sidecarMounts,
+					permissions: sidecarPermissions,
+					commandPermissions: processed.commandPermissions,
+					loopbackExemptPorts: options?.loopbackExemptPorts,
 					commandGuestPaths,
 					onDispose: cleanup,
 				});
@@ -2711,6 +2906,10 @@ export class AgentOs {
 					hostMounts,
 					kernel,
 					rootView: rootBridge.createRootView(),
+					sidecarMounts,
+					sidecarPermissions,
+					commandPermissions: processed.commandPermissions,
+					loopbackExemptPorts: options?.loopbackExemptPorts,
 					sidecarClient: client,
 					sidecarSession: session,
 					sidecarVm: nativeVm,
@@ -2761,19 +2960,20 @@ export class AgentOs {
 			});
 			const vmAdmin = sidecarLease.admin;
 
-			const vm = new AgentOs(
-				vmAdmin.kernel,
-				sidecar,
-				processed.softwareRoots,
+				const vm = new AgentOs(
+					vmAdmin.kernel,
+					sidecar,
+					processed.softwareRoots,
 				processed.agentConfigs,
 				vmAdmin.hostMounts,
 				vmAdmin.env,
 				vmAdmin.rootView,
-				vmAdmin.sidecarClient,
-				vmAdmin.sidecarSession,
-				vmAdmin.sidecarVm,
-				options?.onAgentStderr ?? defaultAgentStderrHandler,
-			);
+					vmAdmin.sidecarClient,
+					vmAdmin.sidecarSession,
+					vmAdmin.sidecarVm,
+					options?.additionalInstructions,
+					options?.onAgentStderr ?? defaultAgentStderrHandler,
+				);
 			vm._sidecarLease = sidecarLease;
 			vm._toolKits = vmAdmin.toolKits;
 			vm._toolReference = vmAdmin.toolReference;
@@ -3160,7 +3360,7 @@ export class AgentOs {
 
 	async delete(path: string, options?: { recursive?: boolean }): Promise<void> {
 		this._assertSafeAbsolutePath(path);
-		const s = await this.#kernel.stat(path);
+		const s = await this._vfs().lstat(path);
 		if (s.isDirectory) {
 			if (options?.recursive) {
 				const entries = await this.#kernel.readdir(path);
@@ -3993,17 +4193,20 @@ export class AgentOs {
 				adapterEntrypoint,
 				args: launchArgs,
 				env: new Map(Object.entries(launchEnv)),
-				cwd: sessionCwd,
-				mcpServers: JSON.stringify(options?.mcpServers ?? []),
-				protocolVersion: ACP_PROTOCOL_VERSION,
-				clientCapabilities: JSON.stringify(defaultAcpClientCapabilities()),
-				additionalInstructions: combineInstructions(
-					options?.additionalInstructions,
-					this._toolReference,
-				),
-				skipOsInstructions: options?.skipOsInstructions ?? false,
-			},
-		});
+					cwd: sessionCwd,
+					mcpServers: JSON.stringify(options?.mcpServers ?? []),
+					protocolVersion: ACP_PROTOCOL_VERSION,
+					clientCapabilities: JSON.stringify(defaultAcpClientCapabilities()),
+					additionalInstructions: combineInstructions(
+						[this._additionalInstructions, options?.additionalInstructions]
+							.map((part) => part?.trim())
+							.filter((part): part is string => Boolean(part))
+							.join("\n\n") || undefined,
+						this._toolReference,
+					),
+					skipOsInstructions: options?.skipOsInstructions ?? false,
+				},
+			});
 		if (response.tag !== "AcpSessionCreatedResponse") {
 			throw new Error(`unexpected create_session response: ${response.tag}`);
 		}
@@ -4104,6 +4307,11 @@ export class AgentOs {
 		const { sessionId: liveSessionId, mode } = response.val;
 
 		// Register + hydrate the live session so subsequent prompts route to it.
+		const existing = this._sessions.get(liveSessionId);
+		if (existing !== undefined && !existing.closed) {
+			throw new Error(`session id collision: ${liveSessionId}`);
+		}
+
 		const session = sessionEntryFromInit(liveSessionId, String(agentType), {});
 		this._closedSessionIds.delete(liveSessionId);
 		this._sessions.set(liveSessionId, session);
@@ -4198,11 +4406,7 @@ export class AgentOs {
 				case "host_callback":
 					return handleHostCallback(request, context);
 				case "js_bridge_call":
-					return Promise.resolve({
-						type: "js_bridge_result",
-						call_id: request.payload.call_id,
-						error: `unsupported sidecar request type: ${request.payload.type}`,
-					});
+					return handleJsBridgeCall(request.payload, { filesystem: this.#kernel.vfs });
 				case "ext":
 					return this._handleAcpExtSidecarRequest(request.payload.envelope);
 			}

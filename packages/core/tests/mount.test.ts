@@ -4,24 +4,81 @@ import {
 	createInMemoryFileSystem,
 	createInMemoryLayerStore,
 	createSnapshotExport,
+	type VirtualFileSystem,
 } from "../src/index.js";
 
+const VFS_METHODS = [
+	"readFile",
+	"readTextFile",
+	"readDir",
+	"readDirWithTypes",
+	"writeFile",
+	"createDir",
+	"mkdir",
+	"exists",
+	"stat",
+	"removeFile",
+	"removeDir",
+	"rename",
+	"realpath",
+	"symlink",
+	"readlink",
+	"lstat",
+	"link",
+	"chmod",
+	"chown",
+	"utimes",
+	"truncate",
+	"pread",
+	"pwrite",
+] as const;
+
+function createRecordingFilesystem(): {
+	fs: VirtualFileSystem;
+	calls: string[];
+} {
+	const base = createInMemoryFileSystem();
+	const calls: string[] = [];
+	const delegates = base as unknown as Record<
+		(typeof VFS_METHODS)[number],
+		(...args: unknown[]) => unknown
+	>;
+	const fs = Object.fromEntries(
+		VFS_METHODS.map((method) => [
+			method,
+			(...args: unknown[]) => {
+				calls.push(`${method}:${String(args[0])}`);
+				return delegates[method].apply(base, args);
+			},
+		]),
+	) as unknown as VirtualFileSystem;
+
+	return { fs, calls };
+}
+
+function createMountVm(
+	options: NonNullable<Parameters<typeof AgentOs.create>[0]> = {},
+): Promise<AgentOs> {
+	return AgentOs.create({ defaultSoftware: false, ...options });
+}
+
 describe("mount integration", () => {
-	let vm: AgentOs;
+	let vm: AgentOs | undefined;
 
 	afterEach(async () => {
-		await vm.dispose();
+		await vm?.dispose();
+		vm = undefined;
 	});
 
 	test("create with memory mount", async () => {
-		vm = await AgentOs.create({
+		vm = await createMountVm({
 			mounts: [{ path: "/data", driver: createInMemoryFileSystem() }],
 		});
 		expect(await vm.exists("/data")).toBe(true);
 	});
 
 	test("writeFile and readFile round-trip through mounted backend", async () => {
-		vm = await AgentOs.create({
+		vm = await createMountVm({
 			mounts: [{ path: "/data", driver: createInMemoryFileSystem() }],
 		});
 		await vm.writeFile("/data/foo.txt", "hello mount");
@@ -30,7 +87,7 @@ describe("mount integration", () => {
 	});
 
 	test("create with declarative native memory mount config", async () => {
-		vm = await AgentOs.create({
+		vm = await createMountVm({
 			mounts: [
 				{
 					path: "/native",
@@ -47,7 +104,7 @@ describe("mount integration", () => {
 	});
 
 	test("root FS and mount are separate", async () => {
-		vm = await AgentOs.create({
+		vm = await createMountVm({
 			mounts: [{ path: "/data", driver: createInMemoryFileSystem() }],
 		});
 		await vm.writeFile("/home/agentos/foo.txt", "root content");
@@ -60,7 +117,7 @@ describe("mount integration", () => {
 	});
 
 	test("runtime mountFs and unmountFs work", async () => {
-		vm = await AgentOs.create();
+		vm = await createMountVm();
 
 		vm.mountFs("/mnt/dynamic", createInMemoryFileSystem());
 		await vm.writeFile("/mnt/dynamic/test.txt", "dynamic");
@@ -69,10 +126,78 @@ describe("mount integration", () => {
 
 		vm.unmountFs("/mnt/dynamic");
 		await expect(vm.readFile("/mnt/dynamic/test.txt")).rejects.toThrow();
+		// Runtime mount + unmount each trigger a full sidecar reconfigure, so this
+		// integration test needs more than the 30s default (see PR #1521 CI).
+	}, 120_000);
+
+	test("runtime mountFs routes through a plain JS VFS driver", async () => {
+		const mounted = createRecordingFilesystem();
+		vm = await createMountVm();
+
+		vm.mountFs("/mnt/custom", mounted.fs);
+		await vm.writeFile("/mnt/custom/note.txt", "from custom vfs");
+
+		expect(
+			new TextDecoder().decode(await vm.readFile("/mnt/custom/note.txt")),
+		).toBe("from custom vfs");
+		expect(mounted.calls).toContain("writeFile:/note.txt");
+		expect(mounted.calls).toContain("readFile:/note.txt");
+
+		vm.unmountFs("/mnt/custom");
+		await expect(vm.readFile("/mnt/custom/note.txt")).rejects.toThrow();
+		// Runtime mount + unmount each trigger a full sidecar reconfigure, so this
+		// integration test needs more than the 30s default (see PR #1521 CI).
+	}, 120_000);
+
+	test("guest processes can read and write a create-time plain JS VFS mount", async () => {
+		const mounted = createRecordingFilesystem();
+		vm = await createMountVm({
+			mounts: [{ path: "/mnt/custom", driver: mounted.fs }],
+		});
+
+		await vm.writeFile("/mnt/custom/host.txt", "from host api");
+		const result = await vm.execArgv("node", [
+			"-e",
+			[
+				'const { readFileSync, writeFileSync } = require("node:fs");',
+				'console.log(readFileSync("/mnt/custom/host.txt", "utf8"));',
+				'writeFileSync("/mnt/custom/guest.txt", "from guest process");',
+			].join("\n"),
+		]);
+		expect(result.exitCode, result.stderr).toBe(0);
+		expect(result.stdout.trim()).toBe("from host api");
+		expect(mounted.calls).toContain("readFile:/host.txt");
+		expect(mounted.calls).toContain("writeFile:/guest.txt");
+		expect(
+			new TextDecoder().decode(await vm.readFile("/mnt/custom/guest.txt")),
+		).toBe("from guest process");
+	});
+
+	test("guest processes can read and write a runtime-mounted plain JS VFS", async () => {
+		const mounted = createRecordingFilesystem();
+		vm = await createMountVm();
+
+		vm.mountFs("/mnt/custom", mounted.fs);
+		await vm.writeFile("/mnt/custom/host.txt", "from host api");
+		const result = await vm.execArgv("node", [
+			"-e",
+			[
+				'const { readFileSync, writeFileSync } = require("node:fs");',
+				'console.log(readFileSync("/mnt/custom/host.txt", "utf8"));',
+				'writeFileSync("/mnt/custom/guest.txt", "from guest process");',
+			].join("\n"),
+		]);
+		expect(result.exitCode, result.stderr).toBe(0);
+		expect(result.stdout.trim()).toBe("from host api");
+		expect(mounted.calls).toContain("readFile:/host.txt");
+		expect(mounted.calls).toContain("writeFile:/guest.txt");
+		expect(
+			new TextDecoder().decode(await vm.readFile("/mnt/custom/guest.txt")),
+		).toBe("from guest process");
 	});
 
 	test("readdir('/') includes 'data' alongside standard POSIX dirs", async () => {
-		vm = await AgentOs.create({
+		vm = await createMountVm({
 			mounts: [{ path: "/data", driver: createInMemoryFileSystem() }],
 		});
 		const entries = await vm.readdir("/");
@@ -83,7 +208,7 @@ describe("mount integration", () => {
 	});
 
 	test("rename across mounts throws EXDEV", async () => {
-		vm = await AgentOs.create({
+		vm = await createMountVm({
 			mounts: [{ path: "/data", driver: createInMemoryFileSystem() }],
 		});
 		await vm.writeFile("/data/cross.txt", "cross-mount");
@@ -93,7 +218,7 @@ describe("mount integration", () => {
 	});
 
 	test("readOnly mount blocks writeFile with EROFS", async () => {
-		vm = await AgentOs.create({
+		vm = await createMountVm({
 			mounts: [
 				{ path: "/ro", driver: createInMemoryFileSystem(), readOnly: true },
 			],
@@ -127,7 +252,7 @@ describe("mount integration", () => {
 			]).source,
 		});
 
-		vm = await AgentOs.create({
+		vm = await createMountVm({
 			mounts: [
 				{
 					path: "/data",
@@ -164,7 +289,7 @@ describe("mount integration", () => {
 			]).source,
 		});
 
-		vm = await AgentOs.create({
+		vm = await createMountVm({
 			mounts: [
 				{
 					path: "/data",
