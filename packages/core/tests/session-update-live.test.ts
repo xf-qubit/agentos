@@ -13,13 +13,12 @@ import { moduleAccessMounts } from "./helpers/node-modules-mount.js";
 import { hasRegistryCommands } from "./helpers/registry-commands.js";
 
 /**
- * REPRO / REGRESSION: "onSessionUpdate not delivered live mid-turn with Pi"
- * (zid / image 12).
+ * REPRO / REGRESSION: "onSessionUpdate not delivered live mid-turn with Pi".
  *
  * Root cause: the secure-exec stdio loop `await`s the entire `session/prompt`
  * dispatch before flushing any frames, and `acp_extension.rs::session_request`
  * collects every `session/update` into `exchange.events`, returning them only
- * after the turn resolves. A streaming consumer (rivetkit / zid via agentos-core)
+ * after the turn resolves. A streaming consumer (rivetkit via agentos-core)
  * therefore gets ZERO updates mid-turn and the whole batch at the end.
  *
  * Making the window observable: a zero-latency llmock collapses the whole agent
@@ -71,7 +70,7 @@ function isSessionUpdate(event: TimedEvent): boolean {
 	return event.method === "session/update";
 }
 
-describe("REPRO: Pi session/update live delivery (zid / image 12)", () => {
+describe("REPRO: Pi session/update live delivery", () => {
 	test("session/update events stream live mid-turn, not batched at prompt resolution", async () => {
 		const workspacePath = "/home/agentos/workspace/tool-verify.txt";
 		const expectedToolResult = "Successfully wrote";
@@ -178,7 +177,7 @@ describe("REPRO: Pi session/update live delivery (zid / image 12)", () => {
 			const gap = promptResolved - firstUpdateT;
 
 			/* eslint-disable no-console */
-			console.log("\n===== ZID onSessionUpdate REPRO DIAGNOSTIC =====");
+			console.log("\n===== onSessionUpdate REPRO DIAGNOSTIC =====");
 			console.log(`injected latency          : ${RESPONSE_LATENCY_MS}ms`);
 			console.log(`prompt resolved at        : ${promptResolved.toFixed(1)}ms`);
 			console.log(
