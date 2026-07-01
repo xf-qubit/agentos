@@ -11,6 +11,10 @@ import { compareBaselineFile } from "./compare-baseline.js";
 const RESULTS_DIR = new URL("./results/", import.meta.url).pathname;
 const ITERATIONS = Number(process.env.BENCH_ITERATIONS ?? 20);
 const WARMUP = Number(process.env.BENCH_WARMUP ?? 5);
+const FAMILY_FILTER = process.env.BENCH_FAMILIES
+	?.split(",")
+	.map((family) => family.trim())
+	.filter(Boolean);
 
 export async function runLatencyMatrix(): Promise<OpResult[]> {
 	const vm = await AgentOs.create({
@@ -18,7 +22,10 @@ export async function runLatencyMatrix(): Promise<OpResult[]> {
 	});
 	try {
 		const results: OpResult[] = [];
-		for (const op of allOps) {
+		const ops = FAMILY_FILTER
+			? allOps.filter((op) => FAMILY_FILTER.includes(op.family))
+			: allOps;
+		for (const op of ops) {
 			console.error(`latency ${op.family}/${op.name}`);
 			results.push(await runOp(op, vm, ITERATIONS, WARMUP));
 		}
@@ -32,14 +39,20 @@ async function main(): Promise<void> {
 	const latency = await runLatencyMatrix();
 	const findings = findingsFromLatency(latency);
 	const refuted = refutedFromLatency(latency);
-	const fuzz = await runFuzz({ iterations: ITERATIONS, warmup: WARMUP });
-	const leak = await runLeakSuite();
-	const footprint = await runFootprint();
+	const resourceSnapshotStubbed = ensureResourceSnapshotFallback();
+	const fuzz = FAMILY_FILTER
+		? { findings: [], refuted: [] }
+		: await runFuzz({ iterations: ITERATIONS, warmup: WARMUP });
+	const leak = FAMILY_FILTER ? { findings: [], streams: [] } : await runLeakSuite();
+	const footprint = FAMILY_FILTER
+		? { findings: [], components: [] }
+		: await runFootprint();
 	const findingsJson = {
 		generatedAt: new Date().toISOString(),
 		hardware: getHardware(),
 		iterations: ITERATIONS,
 		warmup: WARMUP,
+		resourceSnapshotStubbed,
 		latency,
 		fuzz,
 		leak,
@@ -79,6 +92,37 @@ async function main(): Promise<void> {
 		]),
 	);
 	console.log(JSON.stringify(findingsJson, null, 2));
+}
+
+// Returns true when the installed @rivet-dev/agentos-core has no
+// getResourceSnapshot and a zero stub was installed. The leak/footprint
+// resource counters are then meaningless — the run must say so loudly and
+// record it in the result JSON rather than reporting fabricated zeros as
+// "no leaks".
+function ensureResourceSnapshotFallback(): boolean {
+	const proto = AgentOs.prototype as unknown as {
+		getResourceSnapshot?: () => Promise<{
+			runningProcesses: number;
+			exitedProcesses: number;
+			openFds: number;
+			sockets: number;
+			pipes: number;
+		}>;
+	};
+	if (typeof proto.getResourceSnapshot === "function") return false;
+	console.error(
+		"WARNING: AgentOs.getResourceSnapshot is missing in this build; " +
+			"leak/footprint resource counters are STUBBED TO ZERO and prove nothing " +
+			"(resourceSnapshotStubbed=true in findings.json).",
+	);
+	proto.getResourceSnapshot = async () => ({
+		runningProcesses: 0,
+		exitedProcesses: 0,
+		openFds: 0,
+		sockets: 0,
+		pipes: 0,
+	});
+	return true;
 }
 
 function criticGaps(

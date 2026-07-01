@@ -1,5 +1,15 @@
 import type { BenchmarkOp } from "../lib/layers.js";
 
+/**
+ * Filesystem differential ops.
+ *
+ * Requested but not shipped:
+ *   - module_import_fresh: guest dynamic import cannot resolve a freshly written
+ *     file, even when written beside the running benchmark module. Verbatim
+ *     smoke error: `Cannot resolve module 'file:///tmp/fuzz-perf-import-1-0-929830bf8caa7.mjs'
+ *     (imported from '/tmp/fuzz-perf-fs-module_import_fresh.mjs'): not found.`
+ */
+
 export const fsFamily: BenchmarkOp[] = [
 	{
 		family: "fs",
@@ -115,6 +125,47 @@ export const fsFamily: BenchmarkOp[] = [
   fs.writeSync(fd, "hello");
   fs.fsyncSync(fd);
   fs.closeSync(fd);
+}`,
+	},
+	{
+		family: "fs",
+		name: "fs_promises_stat_x32",
+		nativeOp: "fs_stat",
+		fileLine: "crates/kernel/src/kernel.rs:1950",
+		reproducer: "32 sequential fs.promises.stat calls on one VM file",
+		setup: `async () => {
+  const fs = await import("node:fs");
+  const path = "/tmp/fuzz-perf-promises-stat.txt";
+  if (!fs.existsSync(path)) fs.writeFileSync(path, "hi");
+}`,
+		program: `async () => {
+  const fs = await import("node:fs");
+  const path = "/tmp/fuzz-perf-promises-stat.txt";
+  for (let k = 0; k < 32; k++) {
+    await fs.promises.stat(path);
+  }
+}`,
+	},
+	{
+		family: "fs",
+		name: "stream_copy_1m",
+		nativeOp: "fs_read",
+		fileLine: "crates/kernel/src/mount_table.rs:814",
+		reproducer: "stream pipeline copies one 1MiB file inside VM",
+		setup: `async () => {
+  const fs = await import("node:fs");
+  const src = "/tmp/fuzz-perf-stream-copy-src.bin";
+  if (!fs.existsSync(src)) fs.writeFileSync(src, Buffer.alloc(1024 * 1024, 7));
+}`,
+		program: `async (i) => {
+  const fs = await import("node:fs");
+  const { pipeline } = await import("node:stream/promises");
+  const src = "/tmp/fuzz-perf-stream-copy-src.bin";
+  const dst = "/tmp/fuzz-perf-stream-copy-dst-" + i + ".bin";
+  await pipeline(fs.createReadStream(src), fs.createWriteStream(dst));
+  const stat = fs.statSync(dst);
+  fs.unlinkSync(dst);
+  if (stat.size !== 1024 * 1024) throw new Error("bad stream copy");
 }`,
 	},
 ];

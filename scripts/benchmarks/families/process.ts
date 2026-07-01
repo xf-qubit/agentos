@@ -218,4 +218,50 @@ export const processFamily: BenchmarkOp[] = [
   if (Buffer.concat(chunks).toString("utf8") !== "hello") throw new Error("bad pipe chain");
 }`,
 	},
+	{
+		family: "process",
+		name: "spawn_stdout_256k_capture",
+		nativeOp: "exec_capture",
+		fileLine: "crates/execution/src/v8_host.rs:296",
+		reproducer: "spawn node child writing 256KiB stdout, capture and verify byte count",
+		program: `async () => {
+  const { spawn } = await import("node:child_process");
+  const child = spawn("node", ["-e", "process.stdout.write(Buffer.alloc(262144, 55))"], {
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  const chunks = [];
+  child.stdout.on("data", (chunk) => chunks.push(chunk));
+  await new Promise((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", (code) => code === 0 ? resolve() : reject(new Error("exit " + code)));
+  });
+  const got = Buffer.concat(chunks);
+  if (got.length !== 262144) throw new Error("stdout byte mismatch: " + got.length);
+}`,
+	},
+	{
+		family: "process",
+		name: "spawn_stdin_roundtrip",
+		nativeOp: "pipe_echo",
+		fileLine: "crates/sidecar/src/filesystem.rs:1284",
+		reproducer: "spawn node stdin->stdout pipe, write and capture one 4KiB payload",
+		program: `async () => {
+  const { spawn } = await import("node:child_process");
+  const payload = Buffer.alloc(4096, 9);
+  const child = spawn("node", ["-e", "process.stdin.on('data', (chunk) => process.stdout.write(chunk)); process.stdin.on('end', () => process.exit(0));"], {
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  const chunks = [];
+  const errors = [];
+  child.stdout.on("data", (chunk) => chunks.push(chunk));
+  child.stderr.on("data", (chunk) => errors.push(chunk));
+  child.stdin.end(payload);
+  await new Promise((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", (code) => code === 0 ? resolve() : reject(new Error("exit " + code + ": " + Buffer.concat(errors).toString("utf8"))));
+  });
+  const got = Buffer.concat(chunks);
+  if (!got.equals(payload)) throw new Error("stdin roundtrip mismatch: " + got.length);
+}`,
+	},
 ];

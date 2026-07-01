@@ -5,6 +5,7 @@ import { netFamily } from "./net.js";
 import { perfFindingsFamily } from "./perf-findings.js";
 import { pipesFamily } from "./pipes.js";
 import { processFamily } from "./process.js";
+import { timersFamily } from "./timers.js";
 
 export const allFamilies = [
 	processFamily,
@@ -12,6 +13,7 @@ export const allFamilies = [
 	fsFamily,
 	dnsFamily,
 	pipesFamily,
+	timersFamily,
 	controlFamily,
 	perfFindingsFamily,
 ];

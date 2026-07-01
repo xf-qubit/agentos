@@ -38,6 +38,8 @@ Run one lane with `BENCH_ONLY=<lane> bash scripts/benchmarks/run-benchmarks.sh`.
 Run without `BENCH_ONLY` to execute the full standard suite. The standard lanes
 are:
 
+Set `BENCH_FAMILIES=net,fs` with `BENCH_ONLY=fuzz-perf` to run only those latency-matrix families and skip the fuzz/leak/footprint stages.
+
 - `coldstart-sleep`
 - `echo-cold-warm`
 - `memory-sleep`
