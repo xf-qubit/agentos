@@ -1,14 +1,15 @@
 //! Agent sessions (ACP) methods + supporting types.
 //!
-//! Ported from `packages/core/src/agent-os.ts` (session methods), `agent-session-types.ts`
-//! (session/mode/config/capability/permission types), and `agents.ts` (`AgentType`, `AgentConfig`).
+//! Ported from `packages/core/src/agent-os.ts` (session methods) and `agent-session-types.ts`
+//! (session/mode/config/capability/permission types). Agent types are resolved dynamically
+//! from the configured `/opt/agentos` package manifests (keyed by manifest `name`), exactly
+//! as the TS client does — there is no hardcoded agent registry.
 //!
 //! ACP = JSON-RPC 2.0 over stdio. Sessions are referenced by string ID and return JSON-serializable
 //! data only. JSON-RPC errors are NOT Rust `Err`; methods that issue requests return a
 //! [`JsonRpcResponse`] whose `error` field may be set.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::Ordering;
 
@@ -18,15 +19,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use agentos_protocol::generated::v1::{
-    AcpCloseSessionRequest, AcpCreateSessionRequest, AcpGetSessionStateRequest, AcpRequest,
-    AcpResponse, AcpResumeSessionRequest, AcpRuntimeKind, AcpSessionCreatedResponse,
-    AcpSessionRequest, AcpSessionStateResponse,
+    AcpCloseSessionRequest, AcpCreateSessionRequest, AcpGetSessionStateRequest,
+    AcpListAgentsRequest, AcpRequest, AcpResponse, AcpResumeSessionRequest, AcpRuntimeKind,
+    AcpSessionCreatedResponse, AcpSessionRequest, AcpSessionStateResponse,
 };
 use agentos_protocol::ACP_EXTENSION_NAMESPACE;
 use secure_exec_client::wire;
 
 use crate::agent_os::{AgentOs, SessionEntry};
-use crate::config::{AgentOsConfig, MountConfig, ToolKit};
+use crate::config::ToolKit;
 use crate::error::ClientError;
 use crate::json_rpc::{JsonRpcError, JsonRpcId, JsonRpcNotification, JsonRpcResponse};
 use crate::stream::Subscription;
@@ -34,13 +35,6 @@ use crate::{CLOSED_SESSION_ID_RETENTION_LIMIT, PERMISSION_TIMEOUT_MS};
 
 /// ACP method name for legacy permission requests/responses.
 const LEGACY_PERMISSION_METHOD: &str = "request/permission";
-
-/// Reserved `env` key on `AcpResumeSessionRequest` carrying the resolved adapter
-/// bin entrypoint. The resume wire request omits a dedicated `adapterEntrypoint`
-/// field; the sidecar reads the entrypoint from this key and strips it before
-/// launching the adapter. Must stay in sync with the sidecar constant of the same
-/// name in `crates/agentos-sidecar/src/acp_extension.rs`.
-const RESUME_ADAPTER_ENTRYPOINT_ENV: &str = "AGENT_OS_RESUME_ADAPTER_ENTRYPOINT";
 
 /// ACP method name for permission requests issued by the agent to the host (TS
 /// `ACP_PERMISSION_METHOD`). Used by the host-request ACP dispatcher in `agent_os.rs`.
@@ -128,159 +122,15 @@ pub struct SessionInfo {
     pub agent_type: String,
 }
 
-/// A registry agent entry from `list_agents`.
+/// A registry agent entry from `list_agents`. Mirrors the TS `AgentRegistryEntry`.
+/// The client is npm-agnostic and parses no manifests: `list_agents` is a sidecar
+/// ACP RPC that enumerates the projected `/opt/agentos` packages. The entry is just
+/// the agent `id`; `installed` is always `true` (the package is materialized into
+/// the VM at boot).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentRegistryEntry {
     pub id: String,
-    #[serde(rename = "acpAdapter")]
-    pub acp_adapter: String,
-    #[serde(rename = "agentPackage")]
-    pub agent_package: String,
     pub installed: bool,
-}
-
-/// Built-in agent ids (mirrors the keys of TS `AGENT_CONFIGS`).
-const BUILTIN_AGENT_IDS: [&str; 4] = ["pi", "pi-cli", "opencode", "claude"];
-
-/// A built-in agent configuration (port of a TS `AGENT_CONFIGS` entry). System-prompt assembly and
-/// injection are owned by the sidecar.
-struct AgentConfigDef {
-    acp_adapter: &'static str,
-    agent_package: &'static str,
-    default_env: &'static [(&'static str, &'static str)],
-}
-
-/// Resolve a built-in agent type to its config (port of TS `AGENT_CONFIGS`).
-fn agent_config(agent_type: &str) -> Option<AgentConfigDef> {
-    Some(match agent_type {
-        "pi" => AgentConfigDef {
-            acp_adapter: "@agentos-software/pi",
-            agent_package: "@mariozechner/pi-coding-agent",
-            default_env: &[],
-        },
-        "pi-cli" => AgentConfigDef {
-            acp_adapter: "pi-acp",
-            agent_package: "@mariozechner/pi-coding-agent",
-            default_env: &[],
-        },
-        "opencode" => AgentConfigDef {
-            acp_adapter: "@agentos-software/opencode",
-            agent_package: "@agentos-software/opencode",
-            default_env: &[
-                ("OPENCODE_DISABLE_CONFIG_DEP_INSTALL", "1"),
-                ("OPENCODE_DISABLE_EMBEDDED_WEB_UI", "1"),
-            ],
-        },
-        "claude" => AgentConfigDef {
-            acp_adapter: "@agentos-software/claude-code",
-            agent_package: "@anthropic-ai/claude-agent-sdk",
-            default_env: &[
-                ("CLAUDE_AGENT_SDK_CLIENT_APP", "@rivet-dev/agentos"),
-                ("CLAUDE_CODE_SIMPLE", "1"),
-                ("CLAUDE_CODE_FORCE_AGENT_OS_RIPGREP", "1"),
-                ("CLAUDE_CODE_DEFER_GROWTHBOOK_INIT", "1"),
-                ("CLAUDE_CODE_DISABLE_CWD_PERSIST", "1"),
-                ("CLAUDE_CODE_DISABLE_DEV_NULL_REDIRECT", "1"),
-                ("CLAUDE_CODE_NODE_SHELL_WRAPPER", "1"),
-                ("CLAUDE_CODE_DISABLE_STREAM_JSON_HOOK_EVENTS", "1"),
-                ("CLAUDE_CODE_SHELL", "/bin/sh"),
-                ("CLAUDE_CODE_SKIP_INITIAL_MESSAGES", "1"),
-                ("CLAUDE_CODE_SKIP_SANDBOX_INIT", "1"),
-                ("CLAUDE_CODE_SIMPLE_SHELL_EXEC", "1"),
-                ("CLAUDE_CODE_SWAP_STDIO", "0"),
-                ("CLAUDE_CODE_USE_PIPE_OUTPUT", "1"),
-                ("DISABLE_TELEMETRY", "1"),
-                ("SHELL", "/bin/sh"),
-                ("USE_BUILTIN_RIPGREP", "0"),
-            ],
-        },
-        _ => return None,
-    })
-}
-
-/// Resolve a package's VM bin entrypoint from the host `node_modules` (port of
-/// TS `_resolvePackageBin`). Prefer legacy `module_access_cwd/node_modules`,
-/// then fall back to the host directory backing a native `/root/node_modules`
-/// mount. The latter is the RivetKit actor path: the TS shim no longer forwards
-/// `moduleAccessCwd`; callers explicitly mount the desired `node_modules`
-/// directory instead.
-fn resolve_package_bin(
-    config: &AgentOsConfig,
-    package_name: &str,
-    bin_name: Option<&str>,
-) -> std::result::Result<String, ClientError> {
-    let mut candidates = Vec::new();
-    let module_access_cwd = config
-        .module_access_cwd
-        .clone()
-        .unwrap_or_else(|| ".".to_string());
-    candidates.push(
-        Path::new(&module_access_cwd)
-            .join("node_modules")
-            .join(package_name)
-            .join("package.json"),
-    );
-    candidates.extend(node_modules_mount_package_json_paths(config, package_name));
-
-    let contents = candidates
-        .iter()
-        .find_map(|path| std::fs::read_to_string(path).ok())
-        .ok_or_else(|| {
-            let looked = candidates
-                .iter()
-                .map(|path| path.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            ClientError::Sidecar(format!(
-                "cannot resolve package {package_name}: no package.json found (looked in {looked})"
-            ))
-        })?;
-    let pkg: Value = serde_json::from_str(&contents).map_err(|error| {
-        ClientError::Sidecar(format!("invalid package.json for {package_name}: {error}"))
-    })?;
-    let bin_entry: Option<String> = match &pkg["bin"] {
-        Value::String(bin) => Some(bin.clone()),
-        Value::Object(map) => bin_name
-            .and_then(|name| map.get(name))
-            .or_else(|| map.get(package_name))
-            .or_else(|| map.values().next())
-            .and_then(|value| value.as_str())
-            .map(|bin| bin.to_string()),
-        _ => None,
-    };
-    let bin_entry = bin_entry.ok_or_else(|| {
-        ClientError::Sidecar(format!("No bin entry found in {package_name}/package.json"))
-    })?;
-    Ok(format!("/root/node_modules/{package_name}/{bin_entry}"))
-}
-
-fn node_modules_mount_package_json_paths(
-    config: &AgentOsConfig,
-    package_name: &str,
-) -> Vec<PathBuf> {
-    config
-        .mounts
-        .iter()
-        .filter_map(|mount| {
-            let MountConfig::Native {
-                path,
-                plugin,
-                read_only: _,
-            } = mount
-            else {
-                return None;
-            };
-            if path != "/root/node_modules" || plugin.id != "host_dir" {
-                return None;
-            }
-            let host_path = plugin
-                .config
-                .as_ref()
-                .and_then(|config| config.get("hostPath"))
-                .and_then(Value::as_str)?;
-            Some(Path::new(host_path).join(package_name).join("package.json"))
-        })
-        .collect()
 }
 
 /// MCP server config used by `create_session`.
@@ -1282,28 +1132,27 @@ impl AgentOs {
         sessions
     }
 
-    /// List available agents (host FS). Unions package agent ids + the built-in `AGENT_CONFIGS`
-    /// keys; `installed` is determined by reading the adapter `package.json` (host FS, try/catch).
-    ///
-    /// PARITY GAP: the agent-config registry (`AGENT_CONFIGS`, package agent configs, software
-    /// roots, adapter `package.json` resolution) does not exist in the client scaffold and lives in
-    /// shared modules this task may not edit. Returns an empty list until that infrastructure is
-    /// added. See `todosLeft`.
-    pub fn list_agents(&self) -> Vec<AgentRegistryEntry> {
-        BUILTIN_AGENT_IDS
-            .iter()
-            .filter_map(|id| {
-                let config = agent_config(id)?;
-                let installed =
-                    resolve_package_bin(self.config(), config.acp_adapter, None).is_ok();
-                Some(AgentRegistryEntry {
-                    id: (*id).to_string(),
-                    acp_adapter: config.acp_adapter.to_string(),
-                    agent_package: config.agent_package.to_string(),
-                    installed,
-                })
+    /// List available agents. A thin forwarder: sends `AcpListAgentsRequest` and
+    /// maps the sidecar's response. The sidecar enumerates the projected
+    /// `/opt/agentos` packages (client parses no manifests). Every such agent is a
+    /// package materialized into the VM at boot, so `installed` is always `true`.
+    pub async fn list_agents(&self) -> Result<Vec<AgentRegistryEntry>> {
+        let response = self
+            .send_acp_request(AcpRequest::AcpListAgentsRequest(AcpListAgentsRequest {
+                reserved: false,
+            }))
+            .await?;
+        let AcpResponse::AcpListAgentsResponse(listed) = response else {
+            return Err(unexpected_acp_response("AcpListAgentsRequest", response).into());
+        };
+        Ok(listed
+            .agents
+            .into_iter()
+            .map(|agent| AgentRegistryEntry {
+                id: agent.id,
+                installed: agent.installed,
             })
-            .collect()
+            .collect())
     }
 
     /// Create an ACP session. Resolves the agent config, merges env (user wins), creates the session
@@ -1316,30 +1165,10 @@ impl AgentOs {
         agent_type: &str,
         options: CreateSessionOptions,
     ) -> Result<SessionId> {
-        let config = agent_config(agent_type)
-            .ok_or_else(|| ClientError::Sidecar(format!("Unknown agent type: {agent_type}")))?;
-
-        // Resolve the ACP adapter's VM bin entrypoint from the host node_modules (mirrors TS
-        // `_resolveAdapterBin` / `_resolvePackageBin`).
-        let adapter_entrypoint = resolve_package_bin(self.config(), config.acp_adapter, None)?;
-
-        // Merge env: agent default_env (lowest) -> user env (wins).
-        let mut env: BTreeMap<String, String> = config
-            .default_env
-            .iter()
-            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
-            .collect();
-        for (key, value) in &options.env {
-            env.insert(key.clone(), value.clone());
-        }
-        if (agent_type == "pi" || agent_type == "pi-cli") && !env.contains_key("PI_ACP_PI_COMMAND")
-        {
-            if let Ok(pi_command) =
-                resolve_package_bin(self.config(), config.agent_package, Some("pi"))
-            {
-                env.insert("PI_ACP_PI_COMMAND".to_string(), pi_command);
-            }
-        }
+        // The client is npm-agnostic: it sends only the agent name. The sidecar
+        // resolves the name -> package -> entrypoint/env/launchArgs from the
+        // projected `/opt/agentos/<name>/current/agentos-package.json` and spawns.
+        let env: BTreeMap<String, String> = options.env.clone();
 
         let cwd = options
             .cwd
@@ -1363,7 +1192,6 @@ impl AgentOs {
                 AcpCreateSessionRequest {
                     agent_type: agent_type.to_string(),
                     runtime: AcpRuntimeKind::JavaScript,
-                    adapter_entrypoint,
                     args: Vec::new(),
                     env: env.into_iter().collect(),
                     cwd,
@@ -1466,33 +1294,10 @@ impl AgentOs {
         agent_type: &str,
         options: ResumeSessionOptions,
     ) -> Result<ResumeSessionResult> {
-        let config = agent_config(agent_type)
-            .ok_or_else(|| ClientError::Sidecar(format!("Unknown agent type: {agent_type}")))?;
-        let adapter_entrypoint = resolve_package_bin(self.config(), config.acp_adapter, None)?;
-
-        // Merge env: agent default_env (lowest) -> user env (wins), then carry the
-        // resolved adapter entrypoint under the sidecar's reserved key (the resume
-        // wire request has no dedicated `adapterEntrypoint` field).
-        let mut env: BTreeMap<String, String> = config
-            .default_env
-            .iter()
-            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
-            .collect();
-        for (key, value) in &options.env {
-            env.insert(key.clone(), value.clone());
-        }
-        if (agent_type == "pi" || agent_type == "pi-cli") && !env.contains_key("PI_ACP_PI_COMMAND")
-        {
-            if let Ok(pi_command) =
-                resolve_package_bin(self.config(), config.agent_package, Some("pi"))
-            {
-                env.insert("PI_ACP_PI_COMMAND".to_string(), pi_command);
-            }
-        }
-        env.insert(
-            RESUME_ADAPTER_ENTRYPOINT_ENV.to_string(),
-            adapter_entrypoint,
-        );
+        // The client is npm-agnostic: it sends only the agent name. The sidecar
+        // resolves the name -> package -> entrypoint/env/launchArgs from the
+        // projected manifest, exactly as `create_session` does.
+        let env: BTreeMap<String, String> = options.env.clone();
 
         let cwd = options
             .cwd

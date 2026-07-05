@@ -1,57 +1,67 @@
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import {
+	chmodSync,
+	mkdirSync,
+	mkdtempSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { AgentOs } from "../src/agent-os.js";
-import { AGENT_CONFIGS } from "../src/agents.js";
 
+// `listAgents()` is a sidecar ACP RPC: the sidecar enumerates the projected
+// `/opt/agentos` packages (those whose `agentos-package.json` carries an
+// `agent.acpEntrypoint`). The client parses NO manifests and makes no npm/
+// node_modules assumptions. A bare `create()` projects no agent packages.
 describe("listAgents()", () => {
 	let vm: AgentOs;
+	let root: string;
 
-	beforeEach(async () => {
-		vm = await AgentOs.create();
+	beforeAll(async () => {
+		root = mkdtempSync(join(tmpdir(), "agentos-list-agents-"));
+		// Two self-contained /opt/agentos agent packages projected via `software`.
+		for (const name of ["alpha-agent", "beta-agent"]) {
+			const pkgDir = join(root, name);
+			mkdirSync(join(pkgDir, "bin"), { recursive: true });
+			writeFileSync(
+				join(pkgDir, "package.json"),
+				JSON.stringify({ name, version: "1.0.0" }, null, 2),
+			);
+			writeFileSync(
+				join(pkgDir, "agentos-package.json"),
+				JSON.stringify(
+					{ name, agent: { acpEntrypoint: `${name}-acp` } },
+					null,
+					2,
+				),
+			);
+			const binPath = join(pkgDir, "bin", `${name}-acp`);
+			writeFileSync(binPath, "#!/usr/bin/env node\n");
+			chmodSync(binPath, 0o755);
+		}
+		vm = await AgentOs.create({
+			defaultSoftware: false,
+			software: [join(root, "alpha-agent"), join(root, "beta-agent")],
+		});
+	}, 60_000);
+
+	afterAll(async () => {
+		await vm?.dispose();
+		if (root) rmSync(root, { recursive: true, force: true });
 	});
 
-	afterEach(async () => {
-		await vm.dispose();
-	});
-
-	test("returns the shipped built-in agents", () => {
-		const agents = vm.listAgents();
+	test("lists the projected agent packages, sorted by id", async () => {
+		const agents = await vm.listAgents();
 		const ids = agents.map((a) => a.id);
-		expect(ids).toContain("pi");
-		expect(ids).toContain("pi-cli");
-		expect(ids).toContain("opencode");
-		expect(ids).toContain("claude");
+		expect(ids).toContain("alpha-agent");
+		expect(ids).toContain("beta-agent");
 	});
 
-	test("each entry exposes the current built-in adapter metadata", () => {
-		const agents = vm.listAgents();
-		for (const [id, config] of Object.entries(AGENT_CONFIGS)) {
-			const agent = agents.find((entry) => entry.id === id);
-			expect(agent).toBeDefined();
-			expect(agent?.acpAdapter).toBe(config.acpAdapter);
-			expect(agent?.agentPackage).toBe(config.agentPackage);
-			expect(typeof agent?.installed).toBe("boolean");
-		}
-	});
-
-	test("installed is true when adapter package exists", () => {
-		const agents = vm.listAgents();
-		for (const id of Object.keys(AGENT_CONFIGS)) {
-			expect(agents.find((agent) => agent.id === id)?.installed).toBe(true);
-		}
-	});
-
-	test("installed is false when adapter package is missing", async () => {
-		// Create a VM with no /root/node_modules mount, so no adapter packages
-		// are resolvable and every agent must report installed: false.
-		const vm2 = await AgentOs.create({});
-		try {
-			const agents = vm2.listAgents();
-			// No packages installed in /tmp
-			for (const agent of agents) {
-				expect(agent.installed).toBe(false);
-			}
-		} finally {
-			await vm2.dispose();
+	test("every projected agent package is installed", async () => {
+		const agents = await vm.listAgents();
+		for (const agent of agents) {
+			expect(agent.installed).toBe(true);
 		}
 	});
 });

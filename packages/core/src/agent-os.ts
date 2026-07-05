@@ -3,21 +3,15 @@ import { randomUUID } from "node:crypto";
 import {
 	existsSync,
 	mkdirSync,
-	mkdtempSync,
 	readdirSync,
-	readFileSync,
-	rmSync,
 	statSync,
-	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import {
 	join,
 	posix as posixPath,
 	resolve as resolveHostPath,
 } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AgentosPackageManifest } from "@agentos-software/manifest";
 import type {
 	MountConfigJsonObject,
 	MountConfigJsonValue,
@@ -92,14 +86,6 @@ export type { ConnectTerminalOptions } from "./runtime-compat.js";
 const ACP_PROTOCOL_VERSION = 1;
 const ACP_EXTENSION_NAMESPACE = "dev.rivet.agent-os.acp";
 const SHELL_DISPOSE_TIMEOUT_MS = 5_000;
-/**
- * Reserved `env` key on `AcpResumeSessionRequest` carrying the resolved adapter
- * bin entrypoint. The resume wire request omits a dedicated `adapterEntrypoint`
- * field; the sidecar reads the entrypoint from this key and strips it before
- * launching the adapter. Must stay in sync with the sidecar constant of the same
- * name in `crates/agentos-sidecar/src/acp_extension.rs`.
- */
-const RESUME_ADAPTER_ENTRYPOINT_ENV = "AGENT_OS_RESUME_ADAPTER_ENTRYPOINT";
 
 function defaultAcpClientCapabilities(): Record<string, unknown> {
 	return {
@@ -170,16 +156,10 @@ export interface BatchReadResult {
 /** Entry in the agent registry, describing an available agent type. */
 export interface AgentRegistryEntry {
 	id: string;
-	/** npm adapter package (legacy agents) — absent for `/opt/agentos` packages. */
-	acpAdapter?: string;
-	/** npm agent package (legacy agents) — absent for `/opt/agentos` packages. */
-	agentPackage?: string;
-	/** Pre-resolved adapter command path for an `/opt/agentos` agent package. */
-	adapterEntrypoint?: string;
 	installed: boolean;
 }
 
-import type { AgentConfig, AgentType } from "./agents.js";
+import type { AgentType } from "./types.js";
 import { getBaseEnvironment } from "./base-filesystem.js";
 import { CronManager } from "./cron/cron-manager.js";
 import type { ScheduleDriver } from "./cron/schedule-driver.js";
@@ -209,21 +189,16 @@ import {
 	type SnapshotLayerHandle,
 } from "./layers.js";
 import {
-	resolveAgentSnapshotBundle,
 	type SoftwareInput,
 	type SoftwareRoot,
 } from "./packages.js";
 import {
-	OPT_AGENTOS_BIN,
 	OPT_AGENTOS_ROOT,
 	type PackageRef,
 	type SoftwarePackageRef,
 	tryReadAgentosPackageManifest,
 } from "./agentos-package.js";
-import {
-	resolveDefaultSoftware,
-	resolveDependencyAgents,
-} from "./default-software.js";
+import { resolveDefaultSoftware } from "./default-software.js";
 import type { PermissionTier } from "./runtime.js";
 import { allowAll, createNodeHostNetworkAdapter } from "./runtime-compat.js";
 import {
@@ -616,11 +591,6 @@ export interface AgentOsOptions {
 	rootFilesystem?: RootFilesystemConfig;
 	/** Filesystems to mount at boot time. */
 	mounts?: MountConfig[];
-	/**
-	 * @deprecated Use `mounts: [nodeModulesMount(path)]` instead.
-	 * Compatibility alias for mounting `<moduleAccessCwd>/node_modules` at `/root/node_modules`.
-	 */
-	moduleAccessCwd?: string;
 	/** Additional instructions appended to the base OS system prompt injected at session start. */
 	additionalInstructions?: string;
 	/** Custom schedule driver for cron jobs. Defaults to TimerScheduleDriver. */
@@ -834,7 +804,6 @@ function toRecord(value: unknown): Record<string, unknown> {
 
 interface NormalizedPackageRef {
 	dir: string;
-	legacyManifest?: AgentosPackageManifest;
 }
 
 function normalizePackageRef(value: unknown): NormalizedPackageRef | undefined {
@@ -843,55 +812,12 @@ function normalizePackageRef(value: unknown): NormalizedPackageRef | undefined {
 	}
 	const record = toRecord(value);
 	if (typeof record.packageDir === "string") {
-		return {
-			dir: record.packageDir,
-			legacyManifest: legacyPackageManifest(record),
-		};
+		return { dir: record.packageDir };
 	}
 	if (typeof record.dir === "string") {
-		return {
-			dir: record.dir,
-			legacyManifest: legacyPackageManifest(record),
-		};
+		return { dir: record.dir };
 	}
 	return undefined;
-}
-
-function legacyPackageManifest(
-	record: Record<string, unknown>,
-): AgentosPackageManifest | undefined {
-	if (typeof record.name !== "string") {
-		return undefined;
-	}
-	const manifest: AgentosPackageManifest = { name: record.name };
-	const agent = toRecord(record.agent);
-	if (typeof agent.acpEntrypoint === "string") {
-		manifest.agent = {
-			acpEntrypoint: agent.acpEntrypoint,
-			...(isStringRecord(agent.env) ? { env: agent.env } : {}),
-			...(Array.isArray(agent.launchArgs) &&
-			agent.launchArgs.every((arg) => typeof arg === "string")
-				? { launchArgs: agent.launchArgs }
-				: {}),
-			...(typeof agent.snapshot === "boolean" ? { snapshot: agent.snapshot } : {}),
-		};
-	}
-	return manifest;
-}
-
-function readPackageManifestForClient(
-	ref: NormalizedPackageRef,
-): AgentosPackageManifest | undefined {
-	return tryReadAgentosPackageManifest(ref.dir) ?? ref.legacyManifest;
-}
-
-function isStringRecord(value: unknown): value is Record<string, string> {
-	return (
-		value !== null &&
-		typeof value === "object" &&
-		!Array.isArray(value) &&
-		Object.values(value).every((entry) => typeof entry === "string")
-	);
 }
 
 type AcpResponseValue<TTag extends AcpResponse["tag"]> = Extract<
@@ -1341,7 +1267,6 @@ const RUNTIME_BOOTSTRAP_COMMANDS = [
 	"python",
 	"python3",
 ] as const;
-const KERNEL_COMMAND_STUB = "#!/bin/sh\n# kernel command stub\n";
 const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 const SIDECAR_BINARY = join(REPO_ROOT, "target/debug/agentos-sidecar");
 const SIDECAR_BUILD_INPUTS = [
@@ -1396,7 +1321,6 @@ function findBootstrapSeedEntry(
 
 function createKernelBootstrapLower(
 	config: RootFilesystemConfig | undefined,
-	commandNames: string[],
 	extraEntries: FilesystemEntry[] = [],
 ): RootSnapshotExport | null {
 	const includesBundledBaseLayer = !(config?.disableDefaultBaseLayer ?? false);
@@ -1440,25 +1364,6 @@ function createKernelBootstrapLower(
 			gid: 0,
 			content: "AA==",
 			encoding: "base64",
-		});
-	}
-
-	const uniqueCommands = [...new Set(commandNames)].sort((a, b) =>
-		a.localeCompare(b),
-	);
-	for (const command of uniqueCommands) {
-		const stubPath = `/bin/${command}`;
-		if (existingPaths.has(stubPath)) {
-			continue;
-		}
-		entries.push({
-			path: stubPath,
-			type: "file",
-			mode: "755",
-			uid: 0,
-			gid: 0,
-			content: KERNEL_COMMAND_STUB,
-			encoding: "utf8",
 		});
 	}
 
@@ -1667,7 +1572,6 @@ async function resolveCompatLocalMounts(
 
 function collectSidecarMountPlan(options: {
 	mounts?: MountConfig[];
-	shimDir: string | null;
 }): {
 	sidecarMounts: Array<ReturnType<typeof serializeMountConfigForSidecar>>;
 	hostMounts: HostMountInfo[];
@@ -1727,37 +1631,11 @@ function collectSidecarMountPlan(options: {
 		pushMount(mount);
 	}
 
-	if (options.shimDir) {
-		pushMount({
-			path: "/usr/local/bin",
-			plugin: createHostDirBackend({
-				hostPath: options.shimDir,
-				readOnly: true,
-			}),
-			readOnly: true,
-		});
-	}
-
 	hostMounts.sort((left, right) => right.vmPath.length - left.vmPath.length);
 	hostPathMappings.sort(
 		(left, right) => right.vmPath.length - left.vmPath.length,
 	);
 	return { sidecarMounts, hostMounts, hostPathMappings };
-}
-
-function materializeToolShimDir(toolKits: ToolKit[]): string {
-	const shimDir = mkdtempSync(join(tmpdir(), "agentos-host-tools-shims-"));
-	writeFileSync(join(shimDir, "agentos"), KERNEL_COMMAND_STUB, { mode: 0o755 });
-
-	for (const toolKit of toolKits) {
-		writeFileSync(
-			join(shimDir, `agentos-${toolKit.name}`),
-			KERNEL_COMMAND_STUB,
-			{ mode: 0o755 },
-		);
-	}
-
-	return shimDir;
 }
 
 function collectToolkitBootstrapCommands(toolKits: ToolKit[]): string[] {
@@ -2684,12 +2562,9 @@ export class AgentOs {
 	);
 	private _pendingShellExitPromises = new Set<Promise<number>>();
 	private _shellCounter = 0;
-	/** Command names linked into `/opt/agentos/bin` at runtime (via the sidecar). */
-	private _linkedCommands = new Set<string>();
 	private _acpTerminals = new Map<string, AcpTerminalEntry>();
 	private _acpTerminalCounter = 0;
 	private _softwareRoots: SoftwareRoot[];
-	private _softwareAgentConfigs: Map<string, AgentConfig>;
 	private _cronManager!: CronManager;
 	private _toolKits: ToolKit[] = [];
 	private _toolReference = "";
@@ -2711,7 +2586,6 @@ export class AgentOs {
 		kernel: Kernel,
 		sidecar: AgentOsSidecar,
 		softwareRoots: SoftwareRoot[],
-		softwareAgentConfigs: Map<string, AgentConfig>,
 		hostMounts: HostMountInfo[],
 		env: Record<string, string>,
 		rootFilesystem: VirtualFileSystem,
@@ -2726,7 +2600,6 @@ export class AgentOs {
 		this.#kernel = kernel;
 		this.sidecar = sidecar;
 		this._softwareRoots = softwareRoots;
-		this._softwareAgentConfigs = softwareAgentConfigs;
 		this._hostMounts = hostMounts;
 		this._env = env;
 		this._rootFilesystem = rootFilesystem;
@@ -2770,7 +2643,7 @@ export class AgentOs {
 		// enter VMs that run them. Unbuilt packages throw with build
 		// instructions; opt out via defaultSoftware: false.
 		const defaultSoftware =
-			options?.defaultSoftware === false ? [] : await resolveDefaultSoftware();
+			options?.defaultSoftware === false ? [] : resolveDefaultSoftware();
 		const software: unknown[] =
 			options?.defaultSoftware === false
 				? (options.software ?? [])
@@ -2785,25 +2658,9 @@ export class AgentOs {
 		});
 		const sidecarPackages = packageRefs.map((ref) => ({ dir: ref.dir }));
 		// All package software is projected into `/opt/agentos` by the sidecar. The
-		// client stages nothing host-side; it only derives the agent configs.
-		const agentConfigs = new Map<string, AgentConfig>();
-		// Register `/opt/agentos` agent packages so `createSession(<name>)`
-		// launches via `/opt/agentos/bin/<acpEntrypoint>`. The wire no longer
-		// carries agent metadata; read it from the package manifest.
-		for (const ref of packageRefs) {
-			const manifest = readPackageManifestForClient(ref);
-			if (!manifest?.agent) continue;
-			agentConfigs.set(manifest.name, {
-				adapterEntrypoint: `${OPT_AGENTOS_BIN}/${manifest.agent.acpEntrypoint}`,
-				launchArgs: manifest.agent.launchArgs,
-				defaultEnv: manifest.agent.env,
-			});
-		}
-		// Agent-SDK snapshot bundle (loaded once per sidecar into the V8 startup
-		// snapshot, reused across sessions) for any snapshot-enabled agent.
-		const snapshotUserlandCode = resolveAgentSnapshotBundle(
-			packageRefs.map((ref) => ({ packageDir: ref.dir })),
-		);
+		// client stages nothing host-side and parses NO package manifests: the
+		// sidecar owns agent resolution, agent enumeration, and agent snapshot
+		// bundle loading from the projected package dirs.
 		const localMounts = await resolveCompatLocalMounts(options?.mounts);
 		const toolKits = options?.toolKits;
 		if (toolKits && toolKits.length > 0) {
@@ -2822,17 +2679,17 @@ export class AgentOs {
 			const toolBootstrapCommands = collectToolkitBootstrapCommands(
 				toolKits ?? [],
 			);
-			const bootstrapLower = createKernelBootstrapLower(
-				options?.rootFilesystem,
-				[...RUNTIME_BOOTSTRAP_COMMANDS, ...toolBootstrapCommands],
-			);
+			const bootstrapCommands = [
+				...RUNTIME_BOOTSTRAP_COMMANDS,
+				...toolBootstrapCommands,
+			];
+			const bootstrapLower = createKernelBootstrapLower(options?.rootFilesystem);
 			let toolReference = "";
 			let rootBridge: NativeSidecarKernelProxy | null = null;
 			let kernel: Kernel | null = null;
 			let client: SidecarProcess | null = null;
 			let createdNativeVm: CreatedVm | null = null;
 			let nativeSession: AuthenticatedSession | null = null;
-			let toolShimDir: string | null = null;
 			let cleanedUp = false;
 
 			const cleanup = async (): Promise<void> => {
@@ -2840,68 +2697,17 @@ export class AgentOs {
 					return;
 				}
 				cleanedUp = true;
-				if (toolShimDir) {
-					rmSync(toolShimDir, { recursive: true, force: true });
-					toolShimDir = null;
-				}
 			};
 
 			try {
 				const env: Record<string, string> = getBaseEnvironment();
-				if (toolKits && toolKits.length > 0) {
-					toolShimDir = materializeToolShimDir(toolKits);
-				}
-				// Guest command paths. The sidecar owns the `/opt/agentos` projection,
-				// but the client's command map (rpc-client) still needs to KNOW the
-				// projected command names so its shell-exec guard (`this.commands.has("sh")`)
-				// and wasmvm routing work. Seed each projected package's commands from its
-				// `bin` map (mirroring the sidecar projection's command derivation), mapped
-				// to their projected `/opt/agentos/bin/<cmd>` path. Tool-shim commands are
-				// added below.
+				// Guest command paths. The sidecar owns the `/opt/agentos` projection and
+				// reports the exact projected package commands after `configureVm`.
+				// Tool-shim commands are added below.
 				const commandGuestPaths = new Map<string, string>();
-				const deriveProjectedCommandNames = (dir: string): string[] => {
-					try {
-						const pkg = JSON.parse(
-							readFileSync(join(dir, "package.json"), "utf8"),
-						) as { bin?: Record<string, string> | string; name?: string };
-						if (pkg.bin && typeof pkg.bin === "object") {
-							return Object.keys(pkg.bin);
-						}
-						if (typeof pkg.bin === "string") {
-							const base = pkg.name?.split("/").pop();
-							if (base) return [base];
-						}
-					} catch {
-						// no/invalid package.json — fall through to the bin/ scan
-					}
-					try {
-						return readdirSync(join(dir, "bin"));
-					} catch {
-						return [];
-					}
-				};
-				for (const ref of packageRefs) {
-					for (const cmd of deriveProjectedCommandNames(ref.dir)) {
-						commandGuestPaths.set(cmd, `/opt/agentos/bin/${cmd}`);
-					}
-				}
-				const requestedMounts = options?.moduleAccessCwd
-					? [
-							...(options.mounts ?? []),
-							{
-								path: "/root/node_modules",
-								plugin: createHostDirBackend({
-									hostPath: join(options.moduleAccessCwd, "node_modules"),
-									readOnly: true,
-								}),
-								readOnly: true,
-							},
-						]
-					: options?.mounts;
 				const { sidecarMounts, hostMounts, hostPathMappings } =
 					collectSidecarMountPlan({
-						mounts: requestedMounts,
-						shimDir: toolShimDir,
+						mounts: options?.mounts,
 					});
 				// Reuse the sidecar handle's single shared native process; this VM
 				// becomes another tenant of it rather than spawning its own process.
@@ -2924,6 +2730,7 @@ export class AgentOs {
 					permissions: sidecarPermissions,
 					limits: options?.limits,
 					loopbackExemptPorts: options?.loopbackExemptPorts ?? [],
+					bootstrapCommands,
 					// 0.3: the Node builtin allow-list moved from configureVm to
 					// VM creation. `undefined` => engine default allow-list;
 					// `[]` => deny all; `[..]` => exactly those. Platform and
@@ -2931,8 +2738,7 @@ export class AgentOs {
 					// emulation), matching the prior behavior where Agent OS only
 					// constrained the builtin allow-list.
 					...(options?.allowedNodeBuiltins !== undefined ||
-					options?.highResolutionTime !== undefined ||
-					snapshotUserlandCode !== undefined
+					options?.highResolutionTime !== undefined
 						? {
 								jsRuntime: {
 									platform: "node" as const,
@@ -2942,9 +2748,6 @@ export class AgentOs {
 										: {}),
 									...(options?.highResolutionTime !== undefined
 										? { highResolutionTime: options.highResolutionTime }
-										: {}),
-									...(snapshotUserlandCode !== undefined
-										? { snapshotUserlandCode }
 										: {}),
 								},
 							}
@@ -2965,14 +2768,18 @@ export class AgentOs {
 						event.ownership.vm_id === nativeVm.vmId,
 					10_000,
 				);
-				await client.configureVm(session, nativeVm, {
+				const configuredVm = await client.configureVm(session, nativeVm, {
 					mounts: sidecarMounts,
 					permissions: sidecarPermissions,
 					commandPermissions: {},
 					loopbackExemptPorts: options?.loopbackExemptPorts,
 					packages: sidecarPackages,
 					packagesMountAt: OPT_AGENTOS_ROOT,
+					toolShimCommands: toolBootstrapCommands,
 				});
+				for (const command of configuredVm.projectedCommands) {
+					commandGuestPaths.set(command.name, command.guestPath);
+				}
 				if (toolKits && toolKits.length > 0) {
 					toolReference = await registerToolkitsOnSidecar(
 						client,
@@ -3084,7 +2891,6 @@ export class AgentOs {
 				vmAdmin.kernel,
 				sidecar,
 				[],
-				agentConfigs,
 				vmAdmin.hostMounts,
 				vmAdmin.env,
 				vmAdmin.rootView,
@@ -3280,35 +3086,6 @@ export class AgentOs {
 		return (this.#kernel as unknown as { vfs: VirtualFileSystem }).vfs;
 	}
 
-	private async _copyPath(from: string, to: string): Promise<void> {
-		const stat = await this._vfs().lstat(from);
-		if (stat.isSymbolicLink) {
-			const target = await this._vfs().readlink(from);
-			await this._vfs().symlink(target, to);
-			return;
-		}
-		if (stat.isDirectory) {
-			await this._mkdirp(posixPath.dirname(to));
-			if (!(await this.#kernel.exists(to))) {
-				await this.#kernel.mkdir(to);
-			}
-			await this._vfs().chmod(to, stat.mode);
-			await this._vfs().chown(to, stat.uid, stat.gid);
-			const entries = await this.#kernel.readdir(from);
-			for (const entry of entries) {
-				if (entry === "." || entry === "..") continue;
-				const fromPath = from === "/" ? `/${entry}` : `${from}/${entry}`;
-				const toPath = to === "/" ? `/${entry}` : `${to}/${entry}`;
-				await this._copyPath(fromPath, toPath);
-			}
-			return;
-		}
-		const content = await this.#kernel.readFile(from);
-		await this.writeFile(to, content);
-		await this._vfs().chmod(to, stat.mode);
-		await this._vfs().chown(to, stat.uid, stat.gid);
-	}
-
 	async readFile(path: string): Promise<Uint8Array> {
 		this._assertSafeAbsolutePath(path);
 		return this.#kernel.readFile(path);
@@ -3390,49 +3167,36 @@ export class AgentOs {
 		options?: ReaddirRecursiveOptions,
 	): Promise<DirEntry[]> {
 		this._assertSafeAbsolutePath(path);
-		const maxDepth = options?.maxDepth;
 		const exclude = options?.exclude ? new Set(options.exclude) : undefined;
+		const entries = await this.#kernel.readdirRecursive(path, {
+			maxDepth: options?.maxDepth,
+		});
+		const excludedPrefixes: string[] = [];
 		const results: DirEntry[] = [];
 
-		// BFS queue: [dirPath, currentDepth]
-		const queue: [string, number][] = [[path, 0]];
-
-		while (queue.length > 0) {
-			const item = queue.shift();
-			if (!item) break;
-			const [dirPath, depth] = item;
-			const entries = await this.#kernel.readdir(dirPath);
-
-			for (const name of entries) {
-				if (name === "." || name === "..") continue;
-				if (exclude?.has(name)) continue;
-
-				const fullPath = dirPath === "/" ? `/${name}` : `${dirPath}/${name}`;
-				const s = await this.#kernel.stat(fullPath);
-
-				if (s.isSymbolicLink) {
-					results.push({
-						path: fullPath,
-						type: "symlink",
-						size: s.size,
-					});
-				} else if (s.isDirectory) {
-					results.push({
-						path: fullPath,
-						type: "directory",
-						size: s.size,
-					});
-					if (maxDepth === undefined || depth < maxDepth) {
-						queue.push([fullPath, depth + 1]);
-					}
-				} else {
-					results.push({
-						path: fullPath,
-						type: "file",
-						size: s.size,
-					});
-				}
+		for (const entry of entries) {
+			if (
+				excludedPrefixes.some(
+					(prefix) => entry.path === prefix || entry.path.startsWith(`${prefix}/`),
+				)
+			) {
+				continue;
 			}
+			if (exclude?.has(entry.name)) {
+				if (entry.isDirectory && !entry.isSymbolicLink) {
+					excludedPrefixes.push(entry.path);
+				}
+				continue;
+			}
+			results.push({
+				path: entry.path,
+				type: entry.isSymbolicLink
+					? "symlink"
+					: entry.isDirectory
+						? "directory"
+						: "file",
+				size: entry.size,
+			});
 		}
 
 		return results;
@@ -3474,30 +3238,14 @@ export class AgentOs {
 	}
 
 	async move(from: string, to: string): Promise<void> {
-		this._assertSafeAbsolutePath(from);
-		this._assertSafeAbsolutePath(to);
-		const sourceStat = await this._vfs().lstat(from);
-		if (!sourceStat.isDirectory || sourceStat.isSymbolicLink) {
-			return this.#kernel.rename(from, to);
-		}
-		await this._copyPath(from, to);
-		await this.delete(from, { recursive: true });
+		this._assertWritableAbsolutePath(from);
+		this._assertWritableAbsolutePath(to);
+		await this.#kernel.movePath(from, to);
 	}
 
 	async delete(path: string, options?: { recursive?: boolean }): Promise<void> {
-		this._assertSafeAbsolutePath(path);
-		const s = await this._vfs().lstat(path);
-		if (s.isDirectory) {
-			if (options?.recursive) {
-				const entries = await this.#kernel.readdir(path);
-				for (const entry of entries) {
-					if (entry === "." || entry === "..") continue;
-					await this.delete(`${path}/${entry}`, { recursive: true });
-				}
-			}
-			return this.#kernel.removeDir(path);
-		}
-		return this.#kernel.removeFile(path);
+		this._assertWritableAbsolutePath(path);
+		await this.#kernel.removePath(path, { recursive: options?.recursive ?? false });
 	}
 
 	async fetch(port: number, request: Request): Promise<Response> {
@@ -3765,79 +3513,34 @@ export class AgentOs {
 			this._sidecarVm,
 			{ dir: ref.dir },
 		);
-		for (const command of commands) {
-			this._linkedCommands.add(command);
+		if (this.#kernel instanceof NativeSidecarKernelProxy) {
+			this.#kernel.registerCommandGuestPaths(
+				new Map(commands.map((command) => [command.name, command.guestPath])),
+			);
 		}
-		const manifest = readPackageManifestForClient(ref);
-		if (manifest?.agent) {
-			this._softwareAgentConfigs.set(manifest.name, {
-				adapterEntrypoint: `${OPT_AGENTOS_BIN}/${manifest.agent.acpEntrypoint}`,
-				launchArgs: manifest.agent.launchArgs,
-				defaultEnv: manifest.agent.env,
-			});
-		}
+		// The client parses no manifests: an `agent` block in the linked package is
+		// picked up by the sidecar (it owns the projected `/opt/agentos` and answers
+		// createSession/listAgents from it). Nothing to record client-side.
 	}
 
-	/** Returns all registered agents with their installation status. */
-	listAgents(): AgentRegistryEntry[] {
-		// Collect agent IDs from package configs, the hardcoded configs, and the
-		// @agentos-software/* agent dependencies (linked lazily on first
-		// createSession — see createSession).
-		const dependencyAgents = resolveDependencyAgents();
-		const allIds = new Set<string>([
-			...this._softwareAgentConfigs.keys(),
-			...dependencyAgents.keys(),
-		]);
-
-		return [...allIds]
-			.map((id): AgentRegistryEntry | null => {
-				let config = this._resolveAgentConfig(id);
-				if (!config) {
-					// Dependency agent not linked yet — report it from its manifest.
-					const dependencyAgent = dependencyAgents.get(id);
-					if (!dependencyAgent) return null;
-					config = {
-						adapterEntrypoint: `${OPT_AGENTOS_BIN}/${dependencyAgent.acpEntrypoint}`,
-					};
-				}
-
-				// An `/opt/agentos` agent package is materialized into the VM at
-				// boot, so it is always "installed" — its adapter is a real command.
-				if (config.adapterEntrypoint || !config.acpAdapter) {
-					return {
-						id,
-						adapterEntrypoint: config.adapterEntrypoint,
-						installed: true,
-					};
-				}
-
-				let installed = false;
-				try {
-					// Check the software roots that provide this adapter package.
-					const vmPrefix = `/root/node_modules/${config.acpAdapter}`;
-					let hostPkgJsonPath: string | null = null;
-					for (const root of this._softwareRoots) {
-						if (root.vmPath === vmPrefix) {
-							hostPkgJsonPath = join(root.hostPath, "package.json");
-							break;
-						}
-					}
-					if (!hostPkgJsonPath) {
-						throw new Error("no package source");
-					}
-					readFileSync(hostPkgJsonPath);
-					installed = true;
-				} catch {
-					// Package not installed
-				}
-				return {
-					id,
-					acpAdapter: config.acpAdapter,
-					agentPackage: config.agentPackage,
-					installed,
-				};
-			})
-			.filter((entry): entry is AgentRegistryEntry => entry !== null);
+	/**
+	 * Returns all registered agents with their installation status. Thin forwarder:
+	 * sends `AcpListAgentsRequest` and maps the response. The sidecar enumerates the
+	 * projected `/opt/agentos` packages (the client parses no manifests). Every such
+	 * agent is a package materialized into the VM, so `installed` is always `true`.
+	 */
+	async listAgents(): Promise<AgentRegistryEntry[]> {
+		const response = await this._sendAcpRequest({
+			tag: "AcpListAgentsRequest",
+			val: { reserved: false },
+		});
+		if (response.tag !== "AcpListAgentsResponse") {
+			throw new Error(`unexpected list_agents response: ${response.tag}`);
+		}
+		return response.val.agents.map((agent) => ({
+			id: agent.id,
+			installed: agent.installed,
+		}));
 	}
 
 	private _syncSessionState(
@@ -4481,49 +4184,25 @@ export class AgentOs {
 	}
 
 	async createSession(
-		agentType: AgentType | string,
+		agentType: AgentType,
 		options?: CreateSessionOptions,
 	): Promise<{ sessionId: string }> {
-		let config = this._resolveAgentConfig(agentType);
-		if (!config) {
-			// Lazily link an agent dependency on first use: agent packages are not
-			// projected by default (each carries a full node closure), so resolve
-			// the @agentos-software/* dep whose packed manifest name matches and
-			// link it into the running VM now. linkSoftware registers its
-			// entrypoint/env from the package's own agentos-package.json.
-			const dependencyAgent = resolveDependencyAgents().get(String(agentType));
-			if (dependencyAgent) {
-				await this.linkSoftware({ packageDir: dependencyAgent.packageDir });
-				config = this._resolveAgentConfig(agentType);
-			}
-		}
-		if (!config) {
-			throw new Error(`Unknown agent type: ${agentType}`);
-		}
-
-		// System-prompt assembly and injection (launch args / OPENCODE_CONTEXTPATHS) are owned by
-		// the sidecar at AcpCreateSessionRequest. The host only forwards additionalInstructions /
-		// skipOsInstructions plus the agent's static launch args and env.
-		const launchArgs = [...(config.launchArgs ?? [])];
-		const launchEnv = { ...config.defaultEnv, ...options?.env };
+		// The client is npm-agnostic: it sends only the agent NAME. The sidecar
+		// resolves the name -> package -> entrypoint/env/launchArgs from the
+		// projected `/opt/agentos/<name>/current/agentos-package.json` and spawns
+		// (including the agent's static launch args and manifest env defaults).
+		// System-prompt assembly/injection (launch args / OPENCODE_CONTEXTPATHS) is
+		// owned by the sidecar; the host only forwards additionalInstructions /
+		// skipOsInstructions plus the caller's env.
+		const launchEnv = { ...options?.env };
 		const sessionCwd = options?.cwd ?? "/workspace";
-		// Every agent is an `/opt/agentos` package now: the config carries a
-		// pre-resolved guest command path (`adapterEntrypoint`) that the sidecar
-		// spawns directly. There is no npm adapter resolution.
-		const adapterEntrypoint = config.adapterEntrypoint;
-		if (!adapterEntrypoint) {
-			throw new Error(
-				`agent "${String(agentType)}" config has no adapterEntrypoint`,
-			);
-		}
 
 		const response = await this._sendAcpRequest({
 			tag: "AcpCreateSessionRequest",
 			val: {
 				agentType: String(agentType),
 				runtime: AcpRuntimeKind.JavaScript,
-				adapterEntrypoint,
-				args: launchArgs,
+				args: [],
 				env: new Map(Object.entries(launchEnv)),
 				cwd: sessionCwd,
 				mcpServers: JSON.stringify(options?.mcpServers ?? []),
@@ -4595,32 +4274,14 @@ export class AgentOs {
 	 */
 	async resumeSession(
 		sessionId: string,
-		agentType: AgentType | string,
+		agentType: AgentType,
 		options?: ResumeSessionOptions,
 	): Promise<ResumeSessionResult> {
-		const config = this._resolveAgentConfig(agentType);
-		if (!config) {
-			throw new Error(`Unknown agent type: ${agentType}`);
-		}
-
-		// Every agent is an `/opt/agentos` package now: the config carries a
-		// pre-resolved guest command path (`adapterEntrypoint`). There is no npm
-		// adapter resolution.
-		const adapterEntrypoint = config.adapterEntrypoint;
-		if (!adapterEntrypoint) {
-			throw new Error(
-				`agent "${String(agentType)}" config has no adapterEntrypoint`,
-			);
-		}
+		// The client is npm-agnostic: it sends only the agent NAME. The sidecar
+		// resolves the name -> package -> entrypoint/env/launchArgs from the
+		// projected manifest, exactly as createSession does.
 		const sessionCwd = options?.cwd ?? "/workspace";
-		// The resume wire request has no dedicated `adapterEntrypoint` field; carry
-		// the resolved entrypoint through env under the sidecar's reserved key. The
-		// sidecar reads it and strips it before launching the adapter.
-		const launchEnv = {
-			...config.defaultEnv,
-			...options?.env,
-			[RESUME_ADAPTER_ENTRYPOINT_ENV]: adapterEntrypoint,
-		};
+		const launchEnv = { ...options?.env };
 
 		const response = await this._sendAcpRequest({
 			tag: "AcpResumeSessionRequest",
@@ -5363,15 +5024,6 @@ export class AgentOs {
 		} catch {
 			return "reject";
 		}
-	}
-
-	/**
-	 * Resolve an agent config by ID. Agents are /opt/agentos packages
-	 * registered from their manifests (explicit software at create, or lazily
-	 * linked dependency agents) — there is no hardcoded fallback config.
-	 */
-	private _resolveAgentConfig(agentType: string): AgentConfig | undefined {
-		return this._softwareAgentConfigs.get(agentType);
 	}
 
 	/**
