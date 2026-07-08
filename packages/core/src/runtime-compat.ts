@@ -429,8 +429,8 @@ export interface Kernel extends KernelInterface {
 		path: string,
 		fs: VirtualFileSystem,
 		options?: { readOnly?: boolean },
-	): void;
-	unmountFs(path: string): void;
+	): void | Promise<void>;
+	unmountFs(path: string): void | Promise<void>;
 	readFile(path: string): Promise<Uint8Array>;
 	writeFile(path: string, content: string | Uint8Array): Promise<void>;
 	mkdir(path: string): Promise<void>;
@@ -2677,7 +2677,7 @@ class NativeKernel implements Kernel {
 		mountPath: string,
 		filesystem: VirtualFileSystem,
 		options?: { readOnly?: boolean },
-	): void {
+	): void | Promise<void> {
 		const localMount = makeLocalCompatMount({
 			path: mountPath,
 			fs: filesystem,
@@ -2688,15 +2688,16 @@ class NativeKernel implements Kernel {
 			(left, right) => right.path.length - left.path.length,
 		);
 		if (!this.proxy) {
+			// Pre-boot mounts apply during kernel initialization.
 			return;
 		}
-		this.proxy.mountFs(mountPath, filesystem, {
+		return this.proxy.mountFs(mountPath, filesystem, {
 			readOnly: localMount.readOnly,
 			sidecarMount: localMount.sidecarMount,
 		});
 	}
 
-	unmountFs(mountPath: string): void {
+	unmountFs(mountPath: string): void | Promise<void> {
 		const normalized = normalizePath(mountPath);
 		const pendingIndex = this.pendingLocalMounts.findIndex(
 			(mount) => mount.path === normalized,
@@ -2704,7 +2705,7 @@ class NativeKernel implements Kernel {
 		if (pendingIndex >= 0) {
 			this.pendingLocalMounts.splice(pendingIndex, 1);
 		}
-		this.proxy?.unmountFs(mountPath);
+		return this.proxy?.unmountFs(mountPath);
 	}
 
 	async readFile(targetPath: string): Promise<Uint8Array> {
