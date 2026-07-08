@@ -65,11 +65,11 @@ describe("frame RPC transport", () => {
 			});
 		});
 
-		const response = transport.sendFrame(
-			3,
-			{ frame_type: "request", request_id: 3, payload: "ping" },
-			{ timeoutMs: 1_000, timeoutMessage: () => "timed out" },
-		);
+		const response = transport.sendFrame(3, {
+			frame_type: "request",
+			request_id: 3,
+			payload: "ping",
+		});
 		await expect(written).resolves.toEqual({
 			frame_type: "request",
 			request_id: 3,

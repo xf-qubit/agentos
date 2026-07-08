@@ -47,6 +47,7 @@ import {
 export {
 	SidecarProcessError,
 	SidecarProcessExited,
+	SidecarSilenceTimeout,
 } from "./sidecar-errors.js";
 export { SidecarEventBufferOverflow } from "./event-buffer.js";
 // `Sidecar` is the public name for the native sidecar process client. The class
@@ -56,27 +57,6 @@ export { SidecarProcess as Sidecar };
 
 const BRIDGE_CONTRACT_VERSION = 1;
 
-const DEFAULT_NATIVE_SIDECAR_FRAME_TIMEOUT_MS = 120_000;
-
-// Per-frame timeout for the native sidecar protocol: how long the host waits for
-// a sidecar response frame before treating the sidecar as unresponsive. A single
-// long host request maps to one frame, so workloads with legitimately long turns
-// (an agent turn with many tool calls, media generation, etc.) can exceed the
-// default and be killed mid-turn with "timed out waiting for sidecar protocol
-// frame". The native sidecar is process-global (spawned once and multiplexed),
-// so this is an env override rather than a per-instance option.
-function resolveNativeSidecarFrameTimeoutMs(): number {
-	const raw = process.env.AGENTOS_SIDECAR_FRAME_TIMEOUT_MS;
-	if (raw !== undefined) {
-		const parsed = Number(raw);
-		if (Number.isFinite(parsed) && parsed > 0) {
-			return parsed;
-		}
-	}
-	return DEFAULT_NATIVE_SIDECAR_FRAME_TIMEOUT_MS;
-}
-
-export const NATIVE_SIDECAR_FRAME_TIMEOUT_MS = resolveNativeSidecarFrameTimeoutMs();
 const DEFAULT_SIDECAR_EVENT_BUFFER_CAPACITY = 4_096;
 const DEFAULT_SIDECAR_GRACEFUL_EXIT_MS = 5_000;
 const DEFAULT_SIDECAR_FORCE_EXIT_MS = 2_000;
@@ -215,22 +195,27 @@ export interface SidecarSpawnOptions {
 	cwd?: string;
 	command?: string;
 	args?: string[];
-	frameTimeoutMs?: number;
 	eventBufferCapacity?: number;
 	// Migration-only compatibility path for pre-BARE test fixtures.
 	payloadCodec?: NativeTransportPayloadCodec;
+	/**
+	 * Override the sidecar silence watchdog window (default 30s). Tests only —
+	 * it is a fixed protocol constant paired with the sidecar's 10s heartbeat
+	 * cadence, not an operator tunable.
+	 */
+	silenceTimeoutMs?: number;
 }
 
 export interface ResolvedSidecarSpawnOptions {
 	cwd?: string;
 	command?: string;
 	args: string[];
-	frameTimeoutMs: number;
 	eventBufferCapacity: number;
 	gracefulExitMs: number;
 	forceExitMs: number;
 	disposedErrorMessage: string;
 	payloadCodec: NativeTransportPayloadCodec;
+	silenceTimeoutMs?: number;
 }
 
 type SidecarProcessSpawnFactory = (
@@ -380,7 +365,7 @@ export class SidecarProcess {
 			command: options.command,
 			args: options.args ?? [],
 			cwd: options.cwd,
-			frameTimeoutMs: options.frameTimeoutMs ?? NATIVE_SIDECAR_FRAME_TIMEOUT_MS,
+			silenceTimeoutMs: options.silenceTimeoutMs,
 			eventBufferCapacity:
 				options.eventBufferCapacity ?? DEFAULT_SIDECAR_EVENT_BUFFER_CAPACITY,
 			gracefulExitMs: DEFAULT_SIDECAR_GRACEFUL_EXIT_MS,

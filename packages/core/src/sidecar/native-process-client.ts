@@ -6,7 +6,6 @@ import "@rivet-dev/agentos-runtime-core/native-client";
 import { SidecarProcess } from "@rivet-dev/agentos-runtime-core/sidecar-client";
 
 export {
-	NATIVE_SIDECAR_FRAME_TIMEOUT_MS,
 	SidecarEventBufferOverflow,
 	SidecarProcess,
 	SidecarProcessError,

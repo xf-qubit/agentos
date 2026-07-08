@@ -15,7 +15,6 @@ import {
 	type AuthenticatedSession,
 	type CreatedVm,
 	type LocalCompatMount,
-	NATIVE_SIDECAR_FRAME_TIMEOUT_MS,
 	NativeSidecarKernelProxy,
 	SidecarProcess,
 	type RootFilesystemEntry,
@@ -2846,7 +2845,6 @@ class NativeKernel implements Kernel {
 			cwd: REPO_ROOT,
 			command: ensureNativeSidecarBinary(),
 			args: [],
-			frameTimeoutMs: NATIVE_SIDECAR_FRAME_TIMEOUT_MS,
 		});
 		const session = await client.authenticateAndOpenSession();
 		const createVmConfig: CreateVmConfig = {

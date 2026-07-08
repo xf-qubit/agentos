@@ -51,6 +51,7 @@ export class FrameRpcTransport<
 	private readonly sidecarRequestListeners = new Set<
 		(request: TSidecarRequestFrame) => void
 	>();
+	private readonly frameActivityListeners = new Set<() => void>();
 
 	constructor(
 		options: FrameRpcTransportOptions<
@@ -88,6 +89,19 @@ export class FrameRpcTransport<
 		};
 	}
 
+	/**
+	 * Observe every classified inbound frame (response, event, or sidecar
+	 * request) before it is routed. This is the transport's liveness signal:
+	 * the silence watchdog resets on each invocation, so ANY inbound traffic —
+	 * not just heartbeats — proves the sidecar is alive.
+	 */
+	onFrameActivity(handler: () => void): () => void {
+		this.frameActivityListeners.add(handler);
+		return () => {
+			this.frameActivityListeners.delete(handler);
+		};
+	}
+
 	onSidecarRequest(handler: (request: TSidecarRequestFrame) => void): () => void {
 		this.sidecarRequestListeners.add(handler);
 		return () => {
@@ -106,12 +120,8 @@ export class FrameRpcTransport<
 	async sendFrame(
 		requestId: number,
 		frame: TWriteFrame,
-		options: {
-			timeoutMs: number;
-			timeoutMessage: () => string;
-		},
 	): Promise<TResponseFrame> {
-		const response = this.pendingResponses.waitForResponse(requestId, options);
+		const response = this.pendingResponses.waitForResponse(requestId);
 		void this.writeFrame(frame).catch((error) => {
 			this.pendingResponses.reject(
 				requestId,
@@ -134,6 +144,7 @@ export class FrameRpcTransport<
 		this.pendingResponses.rejectAll(new Error("frame rpc transport disposed"));
 		this.eventListeners.clear();
 		this.sidecarRequestListeners.clear();
+		this.frameActivityListeners.clear();
 	}
 
 	private dispatchFrame(
@@ -143,6 +154,9 @@ export class FrameRpcTransport<
 			TSidecarRequestFrame
 		>,
 	): void {
+		for (const listener of this.frameActivityListeners) {
+			listener();
+		}
 		switch (classified.kind) {
 			case "response":
 				this.pendingResponses.resolve(

@@ -24,6 +24,16 @@ import {
 } from "./protocol-frames.js";
 import type { LiveOwnershipScope } from "./ownership.js";
 import type { LiveRequestPayload } from "./request-payloads.js";
+import { SidecarSilenceTimeout } from "./sidecar-errors.js";
+
+/**
+ * How long the host tolerates TOTAL inbound silence (no responses, events,
+ * sidecar requests, or heartbeats) before declaring the sidecar dead. The
+ * sidecar heartbeats every 10s from a dedicated thread, so this allows two
+ * missed beats plus margin; it bounds "sidecar is dead or wedged", never "this
+ * request is slow" — individual requests have no deadline of their own.
+ */
+const DEFAULT_SIDECAR_SILENCE_TIMEOUT_MS = 30_000;
 
 export interface SidecarProtocolClientOptions {
 	frameTransport?: FrameTransport<
@@ -32,18 +42,26 @@ export interface SidecarProtocolClientOptions {
 	>;
 	stdin?: Writable;
 	stdout?: Readable;
-	frameTimeoutMs: number;
 	eventBufferCapacity: number;
 	payloadCodec?: ProtocolFramePayloadCodec;
 	stderrText?: () => string;
 	frameError?: (error: Error) => Error;
 	streamEndedError?: () => Error;
+	/** Override the silence watchdog window. Tests only; production uses the default. */
+	silenceTimeoutMs?: number;
+	/**
+	 * Runs when the silence watchdog fires, before pending work is rejected.
+	 * The stdio layer uses it to SIGKILL the sidecar child.
+	 */
+	onSilenceExpired?: () => void;
 }
 
 export class SidecarProtocolClient {
 	private readonly eventBuffer: SidecarEventBuffer<LiveEventFrame>;
 	private readonly eventListeners = new Set<(event: LiveEventFrame) => void>();
-	private readonly frameTimeoutMs: number;
+	private readonly silenceTimeoutMs: number;
+	private silenceTimer: ReturnType<typeof setInterval> | null = null;
+	private lastInboundAtMs = 0;
 	private readonly payloadCodec: ProtocolFramePayloadCodec;
 	private readonly stderrText: () => string;
 	private readonly hostFrameFactory = new HostProtocolFrameFactory();
@@ -64,7 +82,8 @@ export class SidecarProtocolClient {
 	private sidecarRequestHandler: LiveSidecarRequestHandler | null = null;
 
 	constructor(options: SidecarProtocolClientOptions) {
-		this.frameTimeoutMs = options.frameTimeoutMs;
+		this.silenceTimeoutMs =
+			options.silenceTimeoutMs ?? DEFAULT_SIDECAR_SILENCE_TIMEOUT_MS;
 		this.eventBuffer = new SidecarEventBuffer(options.eventBufferCapacity);
 		this.payloadCodec = options.payloadCodec ?? "bare";
 		this.stderrText = options.stderrText ?? (() => "");
@@ -99,6 +118,49 @@ export class SidecarProtocolClient {
 					new Error("sidecar protocol stream ended"),
 			);
 		});
+		this.frameTransport.onFrameActivity(() => {
+			this.lastInboundAtMs = performance.now();
+		});
+		this.startSilenceWatchdog(options.onSilenceExpired);
+	}
+
+	/**
+	 * Arm the silence watchdog: ANY inbound frame resets the clock (see the
+	 * `onFrameActivity` tap above), and the sidecar heartbeats every 10s even
+	 * while busy, so sustained silence for the full window means the process
+	 * is dead or wedged — not slow. The check interval is unref'd so an idle
+	 * host process can still exit naturally.
+	 */
+	private startSilenceWatchdog(onExpired?: () => void): void {
+		this.lastInboundAtMs = performance.now();
+		const checkIntervalMs = Math.max(
+			Math.min(this.silenceTimeoutMs / 4, 1_000),
+			10,
+		);
+		this.silenceTimer = setInterval(() => {
+			const silenceMs = performance.now() - this.lastInboundAtMs;
+			if (silenceMs < this.silenceTimeoutMs) {
+				return;
+			}
+			this.stopSilenceWatchdog();
+			const error = new SidecarSilenceTimeout({
+				silenceMs,
+				stderr: this.stderrText(),
+			});
+			try {
+				onExpired?.();
+			} finally {
+				this.failPermanently(error);
+			}
+		}, checkIntervalMs);
+		this.silenceTimer.unref?.();
+	}
+
+	private stopSilenceWatchdog(): void {
+		if (this.silenceTimer !== null) {
+			clearInterval(this.silenceTimer);
+			this.silenceTimer = null;
+		}
 	}
 
 	setSidecarRequestHandler(handler: LiveSidecarRequestHandler | null): void {
@@ -121,14 +183,12 @@ export class SidecarProtocolClient {
 		}
 
 		const request = this.hostFrameFactory.createRequestFrame(input);
+		// No per-request deadline: only the caller knows whether an operation is
+		// legitimately long (a whole agent turn is one request). A dead or
+		// wedged sidecar rejects this via the silence watchdog instead.
 		const response = await this.frameTransport.sendFrame(
 			request.request_id,
 			request,
-			{
-				timeoutMs: this.frameTimeoutMs,
-				timeoutMessage: () =>
-					`timed out waiting for sidecar protocol frame for ${input.payload.type}\nstderr:\n${this.stderrText()}`,
-			},
 		);
 
 		if (response.payload.type === "rejected") {
@@ -224,10 +284,12 @@ export class SidecarProtocolClient {
 			}
 		}
 		this.closedError = error;
+		this.stopSilenceWatchdog();
 		this.rejectPending(error);
 	}
 
 	dispose(): void {
+		this.stopSilenceWatchdog();
 		this.frameTransport.dispose();
 	}
 
@@ -258,6 +320,16 @@ export class SidecarProtocolClient {
 	}
 
 	private dispatchEvent(event: LiveEventFrame): void {
+		// Transport-level liveness beats from the sidecar. Their arrival already
+		// reset the silence watchdog at the frame layer; they carry no meaning
+		// for consumers and must never reach the bounded event buffer, where a
+		// long-idle VM would accumulate one every 10s until overflow.
+		if (
+			event.payload.type === "structured" &&
+			event.payload.name === "heartbeat"
+		) {
+			return;
+		}
 		for (const listener of this.eventListeners) {
 			try {
 				listener(event);

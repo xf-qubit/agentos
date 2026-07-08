@@ -1,42 +1,32 @@
 interface PendingResponse<TResponse> {
 	resolve: (frame: TResponse) => void;
 	reject: (error: Error) => void;
-	timer: ReturnType<typeof setTimeout>;
 }
 
 export class PendingResponseRegistry<TResponse> {
 	private readonly pending = new Map<number, PendingResponse<TResponse>>();
 
-	waitForResponse(
-		requestId: number,
-		options: {
-			timeoutMs: number;
-			timeoutMessage: () => string;
-		},
-	): Promise<TResponse> {
+	// Deliberately no per-request timer: local framed stdio never loses frames,
+	// so a response is bounded by the transport's silence watchdog (a dead or
+	// wedged sidecar rejects all pending requests through `rejectAll`) rather
+	// than by guessing how long any one request should take.
+	waitForResponse(requestId: number): Promise<TResponse> {
 		if (this.pending.has(requestId)) {
 			throw new Error(
 				`response waiter already registered for request ${requestId}`,
 			);
 		}
 		return new Promise<TResponse>((resolve, reject) => {
-			const entry = {
+			this.pending.set(requestId, {
 				resolve: (frame: TResponse) => {
-					clearTimeout(entry.timer);
 					this.pending.delete(requestId);
 					resolve(frame);
 				},
 				reject: (error: Error) => {
-					clearTimeout(entry.timer);
 					this.pending.delete(requestId);
 					reject(error);
 				},
-				timer: setTimeout(() => {
-					this.pending.delete(requestId);
-					reject(new Error(options.timeoutMessage()));
-				}, options.timeoutMs),
-			};
-			this.pending.set(requestId, entry);
+			});
 		});
 	}
 

@@ -47,6 +47,17 @@ use tokio::time;
 // pumps are cheap no-ops (try_recv + zero-timeout poll), so the higher cadence
 // costs negligible CPU when no guest is issuing RPCs.
 const EVENT_PUMP_INTERVAL: Duration = Duration::from_micros(250);
+// Cadence of sidecar→host heartbeat frames. The host treats sustained inbound
+// silence (several missed beats) as a dead or wedged sidecar and tears the
+// process down, so this is a fixed protocol constant, not a tunable. Emitted
+// from a dedicated thread so beats keep flowing while the dispatch loop is
+// busy inside one long request.
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
+// Connection id stamped on heartbeat frames. Heartbeats are transport-level
+// liveness — not tied to an authenticated connection — and the host consumes
+// them at its frame layer without routing by ownership, so a fixed synthetic
+// id is correct even before any client authenticates.
+const HEARTBEAT_CONNECTION_ID: &str = "sidecar-transport";
 const MAX_STDIN_FRAME_QUEUE: usize = 128;
 const MAX_EVENT_READY_QUEUE: usize = 1;
 // Defense-in-depth headroom for the host-bound frame queue: a burst of output
@@ -184,6 +195,7 @@ async fn run_async(extensions: Vec<Box<dyn Extension>>) -> Result<(), Box<dyn Er
             }
         }
     });
+    spawn_heartbeat_thread(write_tx.clone(), HEARTBEAT_INTERVAL);
 
     thread::spawn({
         let callback_transport = callback_transport.clone();
@@ -688,6 +700,39 @@ fn send_output_frame(
     })
 }
 
+/// Emit a connection-scoped `StructuredEvent { name: "heartbeat" }` frame every
+/// `interval` for as long as the stdout writer is alive. This is the host's
+/// liveness signal: it resets the host's silence watchdog, so a host that sees
+/// no frames at all for several intervals can conclude the sidecar process is
+/// dead or wedged rather than merely busy. Runs on its own thread with a clone
+/// of the outbound frame channel so beats are independent of the dispatch loop.
+fn spawn_heartbeat_thread(write_tx: TrackedSyncSender<ProtocolFrame>, interval: Duration) {
+    thread::spawn(move || loop {
+        thread::sleep(interval);
+        let frame = match crate::service::structured_event_frame(
+            HEARTBEAT_CONNECTION_ID,
+            "heartbeat",
+            std::collections::HashMap::new(),
+        ) {
+            Ok(frame) => frame,
+            Err(error) => {
+                // Unreachable for a fixed name/empty detail; if it ever fires,
+                // stop loudly instead of spinning on a broken encoder.
+                tracing::error!(
+                    target: "agentos_native_sidecar::stdio",
+                    %error,
+                    "failed to encode heartbeat frame; stopping heartbeat thread",
+                );
+                return;
+            }
+        };
+        if send_output_frame(&write_tx, ProtocolFrame::EventFrame(frame)).is_err() {
+            // Writer thread gone — the sidecar is shutting down. Normal exit.
+            return;
+        }
+    });
+}
+
 fn default_compile_cache_root() -> PathBuf {
     // Stable across sidecar processes so V8 compile-cache (cachedData) survives a
     // fresh sidecar/VM and benefits cold starts. Previously keyed by PID, which
@@ -706,6 +751,28 @@ mod tests {
     use std::io::Cursor;
 
     const TEST_EXTENSION_NAMESPACE: &str = "dev.rivet.secure-exec.test.blocking";
+
+    #[test]
+    fn heartbeat_thread_emits_periodic_structured_heartbeat_frames() {
+        let (write_tx, write_rx) =
+            tracked_sync_channel::<ProtocolFrame>(TrackedLimit::SidecarStdoutFrames, 16);
+        spawn_heartbeat_thread(write_tx, Duration::from_millis(5));
+
+        // Two beats prove the emitter is periodic, not one-shot.
+        for beat in 0..2 {
+            let frame = write_rx.recv().expect("heartbeat frame");
+            let ProtocolFrame::EventFrame(event) = frame else {
+                panic!("expected event frame for beat {beat}, got {frame:?}");
+            };
+            let event = crate::wire::event_frame_to_compat(event).expect("decode heartbeat frame");
+            let crate::protocol::EventPayload::Structured(structured) = event.payload else {
+                panic!("expected structured payload for beat {beat}");
+            };
+            assert_eq!(structured.name, "heartbeat");
+        }
+        // Dropping the receiver disconnects the channel; the emitter thread
+        // observes the send failure and exits cleanly.
+    }
 
     #[test]
     fn read_frame_rejects_oversized_prefix_before_allocating_payload() {

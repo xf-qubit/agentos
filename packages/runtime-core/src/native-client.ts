@@ -16,7 +16,6 @@ import type { LiveOwnershipScope } from "./ownership.js";
 import type { LiveRequestPayload } from "./request-payloads.js";
 import type { LiveSidecarEventSelector } from "./event-buffer.js";
 
-export const DEFAULT_SIDECAR_FRAME_TIMEOUT_MS = 120_000;
 export const DEFAULT_SIDECAR_EVENT_BUFFER_CAPACITY = 4_096;
 export const DEFAULT_SIDECAR_GRACEFUL_EXIT_MS = 5_000;
 export const DEFAULT_SIDECAR_FORCE_EXIT_MS = 2_000;
@@ -25,25 +24,30 @@ export interface StdioSidecarProtocolClientSpawnOptions {
 	cwd?: string;
 	command?: string;
 	args?: string[];
-	frameTimeoutMs?: number;
 	eventBufferCapacity?: number;
 	gracefulExitMs?: number;
 	forceExitMs?: number;
 	disposedErrorMessage?: string;
 	payloadCodec?: ProtocolFramePayloadCodec;
+	/**
+	 * Override the silence watchdog window (default 30s). Tests only — the
+	 * window is a fixed protocol constant paired with the sidecar's 10s
+	 * heartbeat cadence, not an operator tunable.
+	 */
+	silenceTimeoutMs?: number;
 }
 
 type ResolvedStdioSidecarProtocolClientOptions = Required<
 	Pick<
 		StdioSidecarProtocolClientSpawnOptions,
-		| "frameTimeoutMs"
 		| "eventBufferCapacity"
 		| "gracefulExitMs"
 		| "forceExitMs"
 		| "disposedErrorMessage"
 		| "payloadCodec"
 	>
->;
+> &
+	Pick<StdioSidecarProtocolClientSpawnOptions, "silenceTimeoutMs">;
 
 export class StdioSidecarProtocolClient implements SidecarProcessTransport {
 	readonly child: StdioSidecarProcess["child"];
@@ -65,9 +69,19 @@ export class StdioSidecarProtocolClient implements SidecarProcessTransport {
 		this.protocolClient = new SidecarProtocolClient({
 			stdin: this.child.stdin,
 			stdout: this.child.stdout,
-			frameTimeoutMs: options.frameTimeoutMs,
 			eventBufferCapacity: options.eventBufferCapacity,
 			payloadCodec: options.payloadCodec,
+			silenceTimeoutMs: options.silenceTimeoutMs,
+			// A silent sidecar is dead or wedged; reap the process so it cannot
+			// linger as a zombie holding VM resources. The watchdog then rejects
+			// all in-flight requests with `SidecarSilenceTimeout`.
+			onSilenceExpired: () => {
+				try {
+					this.child.kill("SIGKILL");
+				} catch {
+					// The child may have exited between the check and the kill.
+				}
+			},
 			stderrText: () => this.sidecarProcess.stderrText(),
 			streamEndedError: () =>
 				this.sidecarProcess.currentExitError() ??
@@ -96,8 +110,7 @@ export class StdioSidecarProtocolClient implements SidecarProcessTransport {
 				cwd: options.cwd,
 			}),
 			{
-				frameTimeoutMs:
-					options.frameTimeoutMs ?? DEFAULT_SIDECAR_FRAME_TIMEOUT_MS,
+				silenceTimeoutMs: options.silenceTimeoutMs,
 				eventBufferCapacity:
 					options.eventBufferCapacity ??
 					DEFAULT_SIDECAR_EVENT_BUFFER_CAPACITY,

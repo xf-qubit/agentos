@@ -23,7 +23,6 @@ function createClient() {
 	const client = new SidecarProtocolClient({
 		stdin,
 		stdout,
-		frameTimeoutMs: 1_000,
 		eventBufferCapacity: 8,
 		payloadCodec: "json",
 		stderrText: () => "stderr",
@@ -138,7 +137,6 @@ describe("sidecar protocol client", () => {
 		const frameTransport = new MemoryFrameTransport();
 		const client = new SidecarProtocolClient({
 			frameTransport,
-			frameTimeoutMs: 1_000,
 			eventBufferCapacity: 8,
 			payloadCodec: "json",
 			stderrText: () => "stderr",
@@ -197,6 +195,124 @@ describe("sidecar protocol client", () => {
 				name: "ready",
 				detail: { ok: "true" },
 			},
+		});
+		client.dispose();
+	});
+
+	it("swallows heartbeat events before waiters and the bounded buffer", async () => {
+		const frameTransport = new MemoryFrameTransport();
+		const client = new SidecarProtocolClient({
+			frameTransport,
+			eventBufferCapacity: 2,
+			payloadCodec: "json",
+			stderrText: () => "stderr",
+		});
+		const heartbeat = (): LiveEventFrame => ({
+			frame_type: "event",
+			schema: SIDECAR_PROTOCOL_SCHEMA,
+			ownership,
+			payload: { type: "structured", name: "heartbeat", detail: {} },
+		});
+
+		// Far more heartbeats than the buffer capacity: if any were buffered,
+		// the overflow would fail the client permanently and the later request
+		// below would reject.
+		for (let i = 0; i < 8; i += 1) {
+			frameTransport.emitFrame(heartbeat());
+		}
+
+		// A predicate waiter that would match anything must not see heartbeats.
+		let sawHeartbeat = false;
+		const waiter = client.waitForEvent((event) => {
+			if (
+				event.payload.type === "structured" &&
+				event.payload.name === "heartbeat"
+			) {
+				sawHeartbeat = true;
+			}
+			return event.payload.type === "vm_lifecycle";
+		});
+		frameTransport.emitFrame(heartbeat());
+		frameTransport.emitFrame({
+			frame_type: "event",
+			schema: SIDECAR_PROTOCOL_SCHEMA,
+			ownership,
+			payload: { type: "vm_lifecycle", state: "ready" },
+		});
+
+		await expect(waiter).resolves.toMatchObject({
+			payload: { type: "vm_lifecycle", state: "ready" },
+		});
+		expect(sawHeartbeat).toBe(false);
+		client.dispose();
+	});
+
+	it("rejects in-flight requests when the silence watchdog fires", async () => {
+		const frameTransport = new MemoryFrameTransport();
+		let expired = 0;
+		const client = new SidecarProtocolClient({
+			frameTransport,
+			eventBufferCapacity: 8,
+			payloadCodec: "json",
+			stderrText: () => "sidecar stderr tail",
+			silenceTimeoutMs: 50,
+			onSilenceExpired: () => {
+				expired += 1;
+			},
+		});
+
+		const response = client.sendRequest({
+			ownership,
+			payload: { type: "create_layer" },
+		});
+
+		await expect(response).rejects.toThrow(
+			/sidecar unresponsive: no protocol frames or heartbeats for \d+ms/,
+		);
+		expect(expired).toBe(1);
+		// The client is failed permanently: later requests reject immediately.
+		await expect(
+			client.sendRequest({ ownership, payload: { type: "create_layer" } }),
+		).rejects.toThrow(/sidecar unresponsive/);
+		client.dispose();
+	});
+
+	it("inbound frames reset the silence watchdog", async () => {
+		const frameTransport = new MemoryFrameTransport();
+		const client = new SidecarProtocolClient({
+			frameTransport,
+			eventBufferCapacity: 8,
+			payloadCodec: "json",
+			stderrText: () => "stderr",
+			silenceTimeoutMs: 120,
+		});
+
+		// Keep beating for well past the silence window; the client must stay
+		// healthy because every heartbeat resets the clock.
+		for (let i = 0; i < 6; i += 1) {
+			await new Promise((resolve) => setTimeout(resolve, 40));
+			frameTransport.emitFrame({
+				frame_type: "event",
+				schema: SIDECAR_PROTOCOL_SCHEMA,
+				ownership,
+				payload: { type: "structured", name: "heartbeat", detail: {} },
+			});
+		}
+
+		const response = client.sendRequest({
+			ownership,
+			payload: { type: "create_layer" },
+		});
+		await expect.poll(() => frameTransport.writes.length).toBe(1);
+		frameTransport.emitFrame({
+			frame_type: "response",
+			schema: SIDECAR_PROTOCOL_SCHEMA,
+			request_id: 1,
+			ownership,
+			payload: { type: "layer_created", layer_id: "layer" },
+		});
+		await expect(response).resolves.toMatchObject({
+			payload: { type: "layer_created", layer_id: "layer" },
 		});
 		client.dispose();
 	});

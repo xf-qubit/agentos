@@ -56,7 +56,6 @@ describe("stdio sidecar protocol client", () => {
 		const client = StdioSidecarProtocolClient.spawn({
 			command: process.execPath,
 			args: [driverPath],
-			frameTimeoutMs: 1_000,
 			eventBufferCapacity: 8,
 			payloadCodec: "json",
 		});
@@ -117,7 +116,6 @@ describe("stdio sidecar protocol client", () => {
 		const sidecarProcess = SidecarProcess.spawn({
 			command: process.execPath,
 			args: [driverPath],
-			frameTimeoutMs: 1_000,
 			eventBufferCapacity: 8,
 			payloadCodec: "json",
 		});

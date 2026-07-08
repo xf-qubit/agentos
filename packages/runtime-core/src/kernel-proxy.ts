@@ -2354,7 +2354,6 @@ export type {
 	SidecarSocketStateEntry,
 } from "./sidecar-process.js";
 export {
-	NATIVE_SIDECAR_FRAME_TIMEOUT_MS,
 	SidecarProcess,
 	SidecarEventBufferOverflow,
 	SidecarProcessError,

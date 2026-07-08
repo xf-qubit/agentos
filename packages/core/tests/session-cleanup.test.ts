@@ -533,7 +533,7 @@ function isSharedRuntimeCloseRaceError(error: unknown): boolean {
 	return [
 		"sidecar stdout closed while reading frame",
 		"Broken pipe (os error 32)",
-		"timed out waiting for sidecar protocol frame for close_agent_session",
+		"sidecar unresponsive: no protocol frames or heartbeats",
 	].some((fragment) => error.message.includes(fragment));
 }
 

@@ -28,6 +28,27 @@ export class SidecarProcessExited extends Error {
 	}
 }
 
+/**
+ * The silence watchdog fired: the sidecar produced no protocol frames at all —
+ * not even its 10s liveness heartbeats — for the full silence window, so the
+ * process is dead or wedged (not merely busy: a busy sidecar still heartbeats
+ * from a dedicated thread). The host kills the sidecar and rejects every
+ * in-flight request with this error.
+ */
+export class SidecarSilenceTimeout extends Error {
+	readonly silenceMs: number;
+	readonly stderr: string;
+
+	constructor(options: { silenceMs: number; stderr: string }) {
+		super(
+			`sidecar unresponsive: no protocol frames or heartbeats for ${Math.round(options.silenceMs)}ms; killing sidecar${formatSidecarStderrSuffix(options.stderr)}`,
+		);
+		this.name = "SidecarSilenceTimeout";
+		this.silenceMs = options.silenceMs;
+		this.stderr = options.stderr;
+	}
+}
+
 export class SidecarProcessError extends Error {
 	readonly childError: Error;
 	readonly stderr: string;

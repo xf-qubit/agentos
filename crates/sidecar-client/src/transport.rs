@@ -36,6 +36,13 @@ const PENDING_REQUEST_LIMIT: usize = 4096;
 /// Product clients can pass an explicit binary path to [`SidecarTransport::spawn`].
 const SIDECAR_BIN_ENV: &str = "AGENTOS_SIDECAR_BIN";
 
+/// How long the host tolerates TOTAL inbound silence (no responses, events, sidecar requests, or
+/// heartbeats) before declaring the sidecar dead. The sidecar heartbeats every 10s from a dedicated
+/// thread even while busy, so this allows two missed beats plus margin; it bounds "sidecar is dead
+/// or wedged", never "this request is slow" — individual requests have no deadline of their own.
+/// Fixed protocol constant paired with the sidecar heartbeat cadence; mirrors the TS client.
+const SIDECAR_SILENCE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// A registered callback that answers a sidecar-initiated request using generated wire types.
 pub type WireSidecarCallback = Arc<
     dyn Fn(
@@ -68,6 +75,8 @@ pub struct SidecarTransport {
     request_writer_tx: mpsc::Sender<Vec<u8>>,
     /// Outbound callback/control response frames. The writer drains this before regular requests.
     control_writer_tx: mpsc::Sender<Vec<u8>>,
+    /// When the reader last received any inbound frame; the silence watchdog reads it.
+    last_inbound_at: parking_lot::Mutex<std::time::Instant>,
 }
 
 impl SidecarTransport {
@@ -110,10 +119,15 @@ impl SidecarTransport {
             callbacks: SccHashMap::new(),
             request_writer_tx,
             control_writer_tx,
+            last_inbound_at: parking_lot::Mutex::new(std::time::Instant::now()),
         });
 
         tokio::spawn(run_writer(stdin, control_writer_rx, request_writer_rx));
         tokio::spawn(run_reader(Arc::downgrade(&transport), stdout));
+        tokio::spawn(run_silence_watchdog(
+            Arc::downgrade(&transport),
+            SIDECAR_SILENCE_TIMEOUT,
+        ));
 
         Ok(transport)
     }
@@ -236,6 +250,17 @@ impl SidecarTransport {
                 }
             }
             wire::ProtocolFrame::EventFrame(event) => {
+                // Transport-level liveness beats from the sidecar. Their arrival
+                // already reset the silence watchdog in the reader; they carry no
+                // meaning for event subscribers, so drop them here (mirrors the
+                // TS client's heartbeat swallow).
+                if matches!(
+                    &event.payload,
+                    wire::EventPayload::StructuredEvent(structured)
+                        if structured.name == "heartbeat"
+                ) {
+                    return;
+                }
                 let _ = self.event_tx.send((event.ownership, event.payload));
             }
             wire::ProtocolFrame::SidecarRequestFrame(request) => {
@@ -429,6 +454,9 @@ async fn run_reader(transport: Weak<SidecarTransport>, mut stdout: ChildStdout) 
         if stdout.read_exact(&mut frame_bytes[4..]).await.is_err() {
             break;
         }
+        // Any complete inbound frame proves the sidecar is alive; the silence
+        // watchdog measures from here.
+        *transport.last_inbound_at.lock() = std::time::Instant::now();
 
         let codec = WireFrameCodec::new(max_frame_bytes);
         match codec.decode(&frame_bytes) {
@@ -444,6 +472,30 @@ async fn run_reader(transport: Weak<SidecarTransport>, mut stdout: ChildStdout) 
 
 fn frame_length_exceeds_limit(length: usize, max_frame_bytes: usize) -> bool {
     length > max_frame_bytes
+}
+
+/// Kill the sidecar and fail all in-flight requests once the transport has seen no inbound frames
+/// (not even heartbeats) for `timeout`. A silent sidecar is dead or wedged, not busy: a busy
+/// sidecar still heartbeats every 10s from a dedicated thread. Exits when the transport drops.
+async fn run_silence_watchdog(transport: Weak<SidecarTransport>, timeout: std::time::Duration) {
+    let check_interval = (timeout / 4).min(std::time::Duration::from_secs(1));
+    loop {
+        tokio::time::sleep(check_interval).await;
+        let Some(transport) = transport.upgrade() else {
+            return;
+        };
+        let silence = transport.last_inbound_at.lock().elapsed();
+        if silence < timeout {
+            continue;
+        }
+        tracing::error!(
+            silence_ms = silence.as_millis() as u64,
+            "sidecar unresponsive: no protocol frames or heartbeats; killing sidecar",
+        );
+        transport.kill_child();
+        transport.fail_all_pending();
+        return;
+    }
 }
 
 fn resolve_sidecar_binary_path(binary_path: Option<String>) -> String {
@@ -473,6 +525,7 @@ mod tests {
             callbacks: SccHashMap::new(),
             request_writer_tx,
             control_writer_tx,
+            last_inbound_at: parking_lot::Mutex::new(std::time::Instant::now()),
         }
     }
 
@@ -599,6 +652,96 @@ mod tests {
                 chunk,
             }) if process_id == "proc-1" && chunk == b"hello".to_vec()
         ));
+    }
+
+    #[tokio::test]
+    async fn silence_watchdog_fails_pending_requests_after_sustained_silence() {
+        let transport = Arc::new(test_transport());
+        let (tx, rx) = oneshot::channel();
+        transport
+            .register_pending_request(1, tx)
+            .expect("register pending request");
+
+        tokio::spawn(run_silence_watchdog(
+            Arc::downgrade(&transport),
+            std::time::Duration::from_millis(40),
+        ));
+
+        // No inbound activity at all: the watchdog must reject the pending
+        // request (dropped sender -> disconnected error at the caller).
+        rx.await
+            .expect_err("watchdog should drop the pending sender");
+        assert_eq!(pending_request_count(&transport), 0);
+    }
+
+    #[tokio::test]
+    async fn silence_watchdog_stays_quiet_while_frames_arrive() {
+        let transport = Arc::new(test_transport());
+        let (tx, mut rx) = oneshot::channel();
+        transport
+            .register_pending_request(1, tx)
+            .expect("register pending request");
+
+        tokio::spawn(run_silence_watchdog(
+            Arc::downgrade(&transport),
+            std::time::Duration::from_millis(120),
+        ));
+
+        // Simulate steady inbound activity (what the reader does per frame)
+        // for well past the silence window; the watchdog must not fire.
+        for _ in 0..6 {
+            tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+            *transport.last_inbound_at.lock() = std::time::Instant::now();
+            assert!(
+                rx.try_recv().is_err(),
+                "pending request must remain registered while frames arrive"
+            );
+        }
+        assert_eq!(pending_request_count(&transport), 1);
+    }
+
+    #[tokio::test]
+    async fn heartbeat_events_are_swallowed_before_the_event_fanout() {
+        let transport = Arc::new(test_transport());
+        let mut wire_events = transport.subscribe_wire_events();
+
+        transport
+            .handle_wire_frame(wire::ProtocolFrame::EventFrame(wire::EventFrame {
+                schema: wire::protocol_schema(),
+                ownership: wire::OwnershipScope::ConnectionOwnership(wire::ConnectionOwnership {
+                    connection_id: "sidecar-transport".to_string(),
+                }),
+                payload: wire::EventPayload::StructuredEvent(wire::StructuredEvent {
+                    name: "heartbeat".to_string(),
+                    detail: std::collections::HashMap::new(),
+                }),
+            }))
+            .await;
+        // A non-heartbeat structured event still fans out, proving the filter
+        // is name-scoped rather than dropping all structured events.
+        transport
+            .handle_wire_frame(wire::ProtocolFrame::EventFrame(wire::EventFrame {
+                schema: wire::protocol_schema(),
+                ownership: wire::OwnershipScope::ConnectionOwnership(wire::ConnectionOwnership {
+                    connection_id: "conn-1".to_string(),
+                }),
+                payload: wire::EventPayload::StructuredEvent(wire::StructuredEvent {
+                    name: "limit_warning".to_string(),
+                    detail: std::collections::HashMap::new(),
+                }),
+            }))
+            .await;
+
+        let (_, payload) = wire_events.recv().await.expect("structured event");
+        assert!(matches!(
+            payload,
+            wire::EventPayload::StructuredEvent(wire::StructuredEvent { name, .. })
+                if name == "limit_warning"
+        ));
+        assert!(
+            wire_events.try_recv().is_err(),
+            "heartbeat must not fan out"
+        );
     }
 
     #[test]

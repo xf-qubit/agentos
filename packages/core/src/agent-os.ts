@@ -217,7 +217,6 @@ import {
 	type AuthenticatedSession,
 	type CreatedVm,
 	createAgentOsSidecarClient,
-	NATIVE_SIDECAR_FRAME_TIMEOUT_MS,
 	NativeSidecarKernelProxy,
 	type RootFilesystemEntry,
 	type SidecarMountDescriptor,
@@ -5534,7 +5533,6 @@ function ensureSharedSidecarNativeProcess(
 				cwd: REPO_ROOT,
 				command: ensureNativeSidecarBinary(),
 				args: [],
-				frameTimeoutMs: NATIVE_SIDECAR_FRAME_TIMEOUT_MS,
 			});
 			// Track the child immediately — BEFORE the handshake await — so a
 			// failed `authenticateAndOpenSession()` can still reap it (otherwise

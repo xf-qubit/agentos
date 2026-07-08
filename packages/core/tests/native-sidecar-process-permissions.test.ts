@@ -193,7 +193,6 @@ describe("native sidecar process client permissions", () => {
 			cwd: REPO_ROOT,
 			command: "node",
 			args: [driverPath, capturePath],
-			frameTimeoutMs: 5_000,
 			payloadCodec: "json",
 		});
 
@@ -306,7 +305,6 @@ describe("native sidecar process client permissions", () => {
 			cwd: REPO_ROOT,
 			command: SIDECAR_BINARY,
 			args: [],
-			frameTimeoutMs: 20_000,
 		});
 
 		try {
@@ -394,7 +392,6 @@ describe("native sidecar process client permissions", () => {
 			cwd: REPO_ROOT,
 			command: SIDECAR_BINARY,
 			args: [],
-			frameTimeoutMs: 20_000,
 		});
 
 		try {
@@ -631,7 +628,6 @@ describe("native sidecar process client permissions", () => {
 			cwd: REPO_ROOT,
 			command: SIDECAR_BINARY,
 			args: [],
-			frameTimeoutMs: 20_000,
 		});
 
 		try {

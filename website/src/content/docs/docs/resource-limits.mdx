@@ -46,6 +46,20 @@ Set caps on the `limits` object in the `agentOS` config. Limits are grouped by s
 - **Filesystem bytes**: writing past the VFS budget fails with a no-space error to the guest.
 - **Counts (fds / processes / sockets)**: hitting a table cap returns the standard POSIX errno (`EMFILE`, `EAGAIN`, etc.), exactly as a real Linux kernel would under `ulimit`.
 
+## Sidecar liveness
+
+Separate from the guest caps above, the host detects a dead or wedged sidecar
+process by silence, not by per-request deadlines. The sidecar emits a liveness
+heartbeat every 10 seconds from a dedicated thread — so it keeps beating even
+mid-way through a long turn — and the host treats 30 seconds with no inbound
+frames at all as a dead sidecar: it kills the process and fails in-flight
+requests with a typed `SidecarSilenceTimeout` error.
+
+Because liveness is silence-based, individual requests have no time limit of
+their own: an agent turn may legitimately run for many minutes without being
+torn down. Neither the heartbeat cadence nor the silence window is
+configurable — they are fixed protocol constants.
+
 ## Warnings & observability
 
 Limits are observable, not just enforced. Every bound — resource caps and the

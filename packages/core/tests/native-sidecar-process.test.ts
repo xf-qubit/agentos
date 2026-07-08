@@ -458,7 +458,6 @@ describe("native sidecar process client", () => {
 			cwd: REPO_ROOT,
 			command: "node",
 			args: [driverPath, capturePath],
-			frameTimeoutMs: 5_000,
 		});
 		client.setSidecarRequestHandler(async (request) => {
 			expect(request.request_id).toBe(-1);
@@ -528,7 +527,6 @@ describe("native sidecar process client", () => {
 			cwd: REPO_ROOT,
 			command: "node",
 			args: [driverPath],
-			frameTimeoutMs: 5_000,
 		});
 		const childPid = (
 			client as unknown as {
@@ -610,7 +608,6 @@ describe("native sidecar process client", () => {
 			cwd: REPO_ROOT,
 			command: "node",
 			args: [driverPath],
-			frameTimeoutMs: 5_000,
 			payloadCodec: "json",
 			eventBufferCapacity: 128,
 		});
@@ -726,7 +723,6 @@ describe("native sidecar process client", () => {
 			cwd: REPO_ROOT,
 			command: "node",
 			args: [driverPath],
-			frameTimeoutMs: 30_000,
 			payloadCodec: "json",
 		});
 
@@ -795,7 +791,6 @@ describe("native sidecar process client", () => {
 				`agentos-sidecar-missing-${process.pid}-${Date.now()}`,
 			),
 			args: [],
-			frameTimeoutMs: 30_000,
 		});
 
 		await expect(client.authenticateAndOpenSession()).rejects.toBeInstanceOf(
@@ -1052,7 +1047,6 @@ describe("native sidecar process client", () => {
 			cwd: REPO_ROOT,
 			command: SIDECAR_BINARY,
 			args: [],
-			frameTimeoutMs: 20_000,
 		});
 
 		try {
@@ -1191,7 +1185,6 @@ describe("native sidecar process client", () => {
 			cwd: REPO_ROOT,
 			command: SIDECAR_BINARY,
 			args: [],
-			frameTimeoutMs: 20_000,
 		});
 
 		try {
@@ -1309,7 +1302,6 @@ describe("native sidecar process client", () => {
 			cwd: REPO_ROOT,
 			command: SIDECAR_BINARY,
 			args: [],
-			frameTimeoutMs: 20_000,
 		});
 
 		try {
@@ -1444,7 +1436,6 @@ describe("native sidecar process client", () => {
 			cwd: REPO_ROOT,
 			command: SIDECAR_BINARY,
 			args: [],
-			frameTimeoutMs: 20_000,
 		});
 
 		try {
@@ -1638,7 +1629,6 @@ describe("native sidecar process client", () => {
 			cwd: REPO_ROOT,
 			command: SIDECAR_BINARY,
 			args: [],
-			frameTimeoutMs: 20_000,
 		});
 
 		try {
@@ -1713,7 +1703,6 @@ describe("native sidecar process client", () => {
 			cwd: REPO_ROOT,
 			command: SIDECAR_BINARY,
 			args: [],
-			frameTimeoutMs: 20_000,
 		});
 
 		try {
