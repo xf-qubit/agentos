@@ -169,12 +169,11 @@ fetch targets, making a clean dependency graph buildable. Coreutils adds a
 strict `build:runtime` script that fails unless all 113 manifest commands,
 aliases, and stubs were built; the ordinary `build` script retains placeholder
 behavior for repository-wide source checks. `CLAUDE.md` and
-`registry/README.md` document the complete runtime sequence:
+the root `justfile` document the complete runtime sequence:
 
 ```bash
 pnpm install --frozen-lockfile
-just registry-native
-pnpm --filter @agentos-software/coreutils build:runtime
+just tools-rebuild
 ```
 
 ### Brush child PID
@@ -184,7 +183,7 @@ pnpm --filter @agentos-software/coreutils build:runtime
 commands.
 
 **Code:** `toolchain/std-patches/crates/brush-core/0004-wasi-process-id.patch`
-returns the PID supplied by the patched WASI process implementation:
+returns the PID supplied by the patched process implementation:
 
 ```rust
 pub fn id(&self) -> Option<u32> {
@@ -192,11 +191,11 @@ pub fn id(&self) -> Option<u32> {
 }
 ```
 
-Coreutils command artifacts are not committed. `just registry-native` applies
-this patch while compiling the complete command set, and
-`pnpm --filter @agentos-software/coreutils build:runtime` stages that output.
-The runtime build is strict so an absent or incomplete native build cannot
-produce a misleading placeholder package; see `registry/README.md`.
+Coreutils command artifacts are not committed. `just toolchain-build` applies
+this patch while compiling the complete command set, and `just tools-rebuild`
+stages that output into the software packages. The runtime build is strict so
+an absent or incomplete native build cannot produce a misleading placeholder
+package.
 
 ### Vim WASI cross-build
 
