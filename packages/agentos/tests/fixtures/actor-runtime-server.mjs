@@ -1,13 +1,33 @@
 import { agentOS, setup } from "../../dist/index.js";
 import { allowAll } from "@rivet-dev/agentos-core/internal/runtime-compat";
+import {
+	CONFORMANCE_ACP_ADAPTER,
+	CONFORMANCE_AGENT_NAME,
+} from "@rivet-dev/agentos-core/test/agent-os-conformance-fixture";
+import { createProjectedAgentPackage } from "@rivet-dev/agentos-core/test/projected-agent-package";
 import { event } from "rivetkit";
+import { coreutils } from "@agentos-software/common";
+
+const conformanceAgent = createProjectedAgentPackage({
+	name: CONFORMANCE_AGENT_NAME,
+	adapterScript: CONFORMANCE_ACP_ADAPTER,
+});
+for (const signal of ["SIGINT", "SIGTERM"]) {
+	process.once(signal, () => {
+		conformanceAgent.cleanup();
+		process.exit(0);
+	});
+}
 
 const vm = agentOS({
 	defaultSoftware: false,
+	software: [coreutils, conformanceAgent.software],
 	permissions: allowAll,
 	createState: (_c, input) => ({
 		wakeCount: 0,
 		creationInput: input ?? null,
+		sessionEventHookCount: 0,
+		permissionRequestHookCount: 0,
 	}),
 	events: {
 		customLifecycle: event(),
@@ -16,6 +36,10 @@ const vm = agentOS({
 		echo: (_c, value) => value,
 		getCreationInput: (c) => c.state.creationInput,
 		getWakeCount: (c) => c.state.wakeCount,
+		getHookCounts: (c) => ({
+			sessionEvent: c.state.sessionEventHookCount,
+			permissionRequest: c.state.permissionRequestHookCount,
+		}),
 		sleepActor: (c) => c.sleep(),
 		inspectAgentOsStorage: async (c) => {
 			const tables = await c.db.execute(
@@ -46,6 +70,12 @@ const vm = agentOS({
 			phase: "wake",
 			wakeCount: c.state.wakeCount,
 		});
+	},
+	onSessionEvent: (c) => {
+		c.state.sessionEventHookCount += 1;
+	},
+	onPermissionRequest: (c) => {
+		c.state.permissionRequestHookCount += 1;
 	},
 });
 

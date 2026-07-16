@@ -1,4 +1,8 @@
 import { AgentOs } from "@rivet-dev/agentos-core";
+import {
+	AGENT_OS_CONFORMANCE_ACTIONS,
+	AGENT_OS_CONFORMANCE_EVENTS,
+} from "@rivet-dev/agentos-core/test/agent-os-conformance";
 import { event } from "rivetkit";
 import { describe, expect, test, vi } from "vitest";
 import { agentOS, createAgentOsActions } from "../src/index.js";
@@ -26,6 +30,46 @@ describe("agentOS actor", () => {
 		expect(definition.config.events).toHaveProperty("countChanged");
 		expect(definition.config.events).toHaveProperty("vmBooted");
 		expect(definition.config.events).toHaveProperty("sessionEvent");
+	});
+
+	test("keeps the shared conformance inventory in lockstep with actor built-ins", () => {
+		const actions = createAgentOsActions();
+		expect(Object.keys(actions).sort()).toEqual(
+			[
+				...AGENT_OS_CONFORMANCE_ACTIONS,
+				"createSignedPreviewUrl",
+				"expireSignedPreviewUrl",
+			].sort(),
+		);
+		const definition = agentOS();
+		expect(Object.keys(definition.config.events ?? {}).sort()).toEqual(
+			[...AGENT_OS_CONFORMANCE_EVENTS, "vmBooted", "vmShutdown"].sort(),
+		);
+	});
+
+	test("creates and expires actor-only signed preview URLs", async () => {
+		const execute = vi.fn(async () => []);
+		const actions = createAgentOsActions();
+		const context = { db: { execute } } as never;
+		const preview = await actions.createSignedPreviewUrl(context, 8080, 60);
+		expect(preview).toMatchObject({
+			path: `/fetch/${preview.token}`,
+			port: 8080,
+		});
+		expect(preview.expiresAt).toBeGreaterThan(Date.now());
+		expect(execute).toHaveBeenCalledWith(
+			expect.stringContaining("INSERT INTO agent_os_preview_tokens"),
+			preview.token,
+			8080,
+			expect.any(Number),
+			preview.expiresAt,
+		);
+
+		await actions.expireSignedPreviewUrl(context, preview.token);
+		expect(execute).toHaveBeenLastCalledWith(
+			expect.stringContaining("DELETE FROM agent_os_preview_tokens"),
+			preview.token,
+		);
 	});
 
 	test("preserves normal actor connection hooks", async () => {
