@@ -7,8 +7,8 @@ import {
 	CONFORMANCE_ACP_ADAPTER,
 	CONFORMANCE_AGENT_NAME,
 	defineAgentOsConformanceSuite,
-} from "../src/test/agent-os-conformance.js";
-import { createProjectedAgentPackage } from "../src/test/projected-agent-package.js";
+} from "@rivet-dev/agentos-test-harness/agent-os-conformance";
+import { createProjectedAgentPackage } from "@rivet-dev/agentos-test-harness/projected-agent-package";
 
 class EventBus {
 	readonly handlers = new Map<string, Set<(payload: any) => void>>();

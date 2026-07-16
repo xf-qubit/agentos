@@ -74,6 +74,7 @@
 		}
 	},
 	"devDependencies": {
+		"@rivet-dev/agentos-test-harness": "workspace:*",
 		"@radix-ui/react-collapsible": "^1.1.2",
 		"@radix-ui/react-scroll-area": "^1.2.2",
 		"@tanstack/react-query": "^5.87.1",

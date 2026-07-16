@@ -2,7 +2,7 @@ import { AgentOs } from "@rivet-dev/agentos-core";
 import {
 	AGENT_OS_CONFORMANCE_ACTIONS,
 	AGENT_OS_CONFORMANCE_EVENTS,
-} from "@rivet-dev/agentos-core/test/agent-os-conformance";
+} from "@rivet-dev/agentos-test-harness/agent-os-conformance";
 import { event } from "rivetkit";
 import { describe, expect, test, vi } from "vitest";
 import { agentOS, createAgentOsActions } from "../src/index.js";

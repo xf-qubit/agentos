@@ -6,7 +6,7 @@ import {
 	type AgentOsConformanceBackend,
 	type AgentOsConformanceEvent,
 	defineAgentOsConformanceSuite,
-} from "@rivet-dev/agentos-core/test/agent-os-conformance";
+} from "@rivet-dev/agentos-test-harness/agent-os-conformance";
 import { expect } from "vitest";
 import { actorHandle, startActorRuntime } from "./helpers/actor-runtime.js";
 

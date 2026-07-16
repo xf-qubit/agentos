@@ -3,8 +3,8 @@ import { allowAll } from "@rivet-dev/agentos-core/internal/runtime-compat";
 import {
 	CONFORMANCE_ACP_ADAPTER,
 	CONFORMANCE_AGENT_NAME,
-} from "@rivet-dev/agentos-core/test/agent-os-conformance-fixture";
-import { createProjectedAgentPackage } from "@rivet-dev/agentos-core/test/projected-agent-package";
+} from "@rivet-dev/agentos-test-harness/agent-os-conformance-fixture";
+import { createProjectedAgentPackage } from "@rivet-dev/agentos-test-harness/projected-agent-package";
 import { event } from "rivetkit";
 import { coreutils } from "@agentos-software/common";
 

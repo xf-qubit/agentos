@@ -1,1 +1,1 @@
-export * from "../../src/test/projected-agent-package.js";
+export * from "@rivet-dev/agentos-test-harness/projected-agent-package";

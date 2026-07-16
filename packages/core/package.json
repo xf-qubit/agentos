@@ -43,21 +43,6 @@
 			"types": "./dist/test/runtime.d.ts",
 			"import": "./dist/test/runtime.js",
 			"default": "./dist/test/runtime.js"
-		},
-		"./test/agent-os-conformance": {
-			"types": "./dist/test/agent-os-conformance.d.ts",
-			"import": "./dist/test/agent-os-conformance.js",
-			"default": "./dist/test/agent-os-conformance.js"
-		},
-		"./test/agent-os-conformance-fixture": {
-			"types": "./dist/test/agent-os-conformance-fixture.d.ts",
-			"import": "./dist/test/agent-os-conformance-fixture.js",
-			"default": "./dist/test/agent-os-conformance-fixture.js"
-		},
-		"./test/projected-agent-package": {
-			"types": "./dist/test/projected-agent-package.d.ts",
-			"import": "./dist/test/projected-agent-package.js",
-			"default": "./dist/test/projected-agent-package.js"
 		}
 	},
 	"scripts": {
@@ -114,6 +99,7 @@
 		"@agentos-software/vim": "workspace:*",
 		"@agentos-software/wget": "workspace:*",
 		"@agentos-software/yq": "workspace:*",
+		"@rivet-dev/agentos-test-harness": "workspace:*",
 		"@anthropic-ai/claude-agent-sdk": "^0.2.87",
 		"@anthropic-ai/claude-code": "^2.1.86",
 		"@bare-ts/tools": "0.15.0",

@@ -7,7 +7,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { SoftwarePackageRef } from "../agentos-package.js";
+
+export interface ProjectedSoftwarePackageRef {
+	packagePath: string;
+}
 
 export interface ProjectedAgentPackageOptions {
 	name: string;
@@ -19,7 +22,7 @@ export interface ProjectedAgentPackageOptions {
 
 export interface ProjectedAgentPackage {
 	packageDir: string;
-	software: SoftwarePackageRef;
+	software: ProjectedSoftwarePackageRef;
 	binPath: string;
 	cleanup(): void;
 }
