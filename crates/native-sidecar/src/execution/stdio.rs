@@ -90,6 +90,7 @@ pub(super) fn service_javascript_kernel_stdin_sync_rpc(
     kernel_stdin_read_response(
         kernel,
         process.kernel_pid,
+        process.kernel_stdin_reader_fd,
         max_bytes,
         Duration::from_millis(timeout_ms),
     )
@@ -125,6 +126,7 @@ pub(crate) fn parse_kernel_stdin_read_args(
 pub(crate) fn kernel_stdin_read_response(
     kernel: &mut SidecarKernel,
     kernel_pid: u32,
+    kernel_fd: u32,
     max_bytes: usize,
     timeout: Duration,
 ) -> Result<Value, SidecarError> {
@@ -132,7 +134,7 @@ pub(crate) fn kernel_stdin_read_response(
         .fd_read_with_timeout_result(
             EXECUTION_DRIVER_NAME,
             kernel_pid,
-            0,
+            kernel_fd,
             max_bytes,
             Some(timeout),
         )
@@ -298,24 +300,47 @@ pub(super) fn service_javascript_kernel_stdio_write_sync_rpc(
     // underlying fd so pipes/files actually receive it.
     let written = if process.tty_master_fd.is_some() {
         chunk.len()
-    } else if fd == 1 {
-        kernel
-            .write_process_stdout(EXECUTION_DRIVER_NAME, process.kernel_pid, &chunk)
-            .map_err(kernel_error)?
     } else {
         kernel
-            .write_process_stderr(EXECUTION_DRIVER_NAME, process.kernel_pid, &chunk)
+            .fd_write_nonblocking(EXECUTION_DRIVER_NAME, process.kernel_pid, fd, &chunk)
             .map_err(kernel_error)?
     };
 
     let event = if fd == 1 {
-        ActiveExecutionEvent::Stdout(chunk)
+        ActiveExecutionEvent::Stdout(chunk[..written].to_vec())
     } else {
-        ActiveExecutionEvent::Stderr(chunk)
+        ActiveExecutionEvent::Stderr(chunk[..written].to_vec())
     };
     process.queue_pending_execution_event(event)?;
 
     Ok(json!(written))
+}
+
+pub(crate) fn service_javascript_kernel_fd_write_sync_rpc(
+    kernel: &mut SidecarKernel,
+    process: &mut ActiveProcess,
+    request: &JavascriptSyncRpcRequest,
+) -> Result<Value, SidecarError> {
+    let fd = javascript_sync_rpc_arg_u32(&request.args, 0, "fd_write fd")?;
+    let chunk = javascript_sync_rpc_bytes_arg(&request.args, 1, "fd_write data")?;
+    let written = kernel
+        .fd_write_nonblocking(EXECUTION_DRIVER_NAME, process.kernel_pid, fd, &chunk)
+        .map_err(kernel_error)?;
+    if written > 0
+        && kernel
+            .fd_stat(EXECUTION_DRIVER_NAME, process.kernel_pid, fd)
+            .map_err(kernel_error)?
+            .filetype
+            == agentos_kernel::fd_table::FILETYPE_REGULAR_FILE
+    {
+        crate::filesystem::mirror_kernel_fd_contents_to_process_shadow(
+            kernel,
+            process,
+            process.kernel_pid,
+            fd,
+        )?;
+    }
+    Ok(Value::from(written))
 }
 
 pub(super) fn service_javascript_kernel_poll_sync_rpc(
@@ -391,7 +416,7 @@ pub(crate) fn kernel_poll_response(
     }))
 }
 
-pub(super) fn install_kernel_stdin_pipe(
+pub(crate) fn install_kernel_stdin_pipe(
     kernel: &mut SidecarKernel,
     pid: u32,
 ) -> Result<u32, SidecarError> {
@@ -403,6 +428,29 @@ pub(super) fn install_kernel_stdin_pipe(
         .map_err(kernel_error)?;
     kernel
         .fd_close(EXECUTION_DRIVER_NAME, pid, read_fd)
+        .map_err(kernel_error)?;
+    // This writer is sidecar-owned plumbing in the guest's fd table. Do not
+    // let a spawned descendant inherit a writer for its own stdin pipe, which
+    // would keep the pipe open forever and prevent EOF.
+    kernel
+        .fd_fcntl(
+            EXECUTION_DRIVER_NAME,
+            pid,
+            write_fd,
+            agentos_kernel::fd_table::F_SETFD,
+            agentos_kernel::fd_table::FD_CLOEXEC,
+        )
+        .map_err(kernel_error)?;
+    // The sidecar services the corresponding reads on this same dispatch
+    // path, so a blocking write to a full pipe would deadlock the VM.
+    kernel
+        .fd_fcntl(
+            EXECUTION_DRIVER_NAME,
+            pid,
+            write_fd,
+            agentos_kernel::fd_table::F_SETFL,
+            agentos_kernel::fd_table::O_NONBLOCK,
+        )
         .map_err(kernel_error)?;
     Ok(write_fd)
 }
@@ -587,7 +635,7 @@ fn recheck_ready_deferred_fd_reads(
         })();
         match descriptor {
             Ok((fd, length)) => {
-                process.deferred_kernel_wait_rpc = None;
+                process.clear_deferred_kernel_wait_rpc();
                 if process
                     .execution
                     .claim_javascript_sync_rpc_response(request.id)?
@@ -625,7 +673,7 @@ fn recheck_ready_deferred_fd_reads(
                 }
             }
             Err(error) => {
-                process.deferred_kernel_wait_rpc = None;
+                process.clear_deferred_kernel_wait_rpc();
                 if process
                     .execution
                     .claim_javascript_sync_rpc_response(request.id)?
@@ -647,6 +695,51 @@ fn recheck_ready_deferred_fd_reads(
     Ok(())
 }
 
+fn recheck_ready_deferred_fd_writes(
+    kernel: &mut SidecarKernel,
+    process: &mut ActiveProcess,
+) -> Result<(), SidecarError> {
+    let parked_request = process
+        .deferred_kernel_wait_rpc
+        .as_ref()
+        .map(|(request, _)| request.clone())
+        .filter(|request| {
+            request.method == "__kernel_stdio_write" || request.method == "process.fd_write"
+        });
+    if let Some(request) = parked_request {
+        let response = if request.method == "__kernel_stdio_write" {
+            service_javascript_kernel_stdio_write_sync_rpc(kernel, process, &request)
+        } else {
+            service_javascript_kernel_fd_write_sync_rpc(kernel, process, &request)
+        };
+        match response {
+            Ok(response) => {
+                process.clear_deferred_kernel_wait_rpc();
+                process
+                    .execution
+                    .respond_javascript_sync_rpc_response(request.id, response.into())
+                    .or_else(ignore_stale_javascript_sync_rpc_response)?;
+            }
+            Err(error) if javascript_sync_rpc_error_code(&error) == "EAGAIN" => {}
+            Err(error) => {
+                process.clear_deferred_kernel_wait_rpc();
+                process
+                    .execution
+                    .respond_javascript_sync_rpc_error(
+                        request.id,
+                        javascript_sync_rpc_error_code(&error),
+                        javascript_sync_rpc_error_message(&error),
+                    )
+                    .or_else(ignore_stale_javascript_sync_rpc_response)?;
+            }
+        }
+    }
+    for child in process.child_processes.values_mut() {
+        recheck_ready_deferred_fd_writes(kernel, child)?;
+    }
+    Ok(())
+}
+
 impl<B> NativeSidecar<B>
 where
     B: NativeSidecarBridge + Send + 'static,
@@ -656,6 +749,14 @@ where
         let kernel = &mut vm.kernel;
         for process in vm.active_processes.values_mut() {
             recheck_ready_deferred_fd_reads(kernel, process)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn wake_ready_deferred_fd_writes(vm: &mut VmState) -> Result<(), SidecarError> {
+        let kernel = &mut vm.kernel;
+        for process in vm.active_processes.values_mut() {
+            recheck_ready_deferred_fd_writes(kernel, process)?;
         }
         Ok(())
     }
@@ -714,4 +815,48 @@ pub(crate) fn close_kernel_process_stdin(
     kernel
         .fd_close(EXECUTION_DRIVER_NAME, process.kernel_pid, writer_fd)
         .map_err(kernel_error)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agentos_kernel::command_registry::CommandDriver;
+    use agentos_kernel::kernel::{KernelVmConfig, SpawnOptions};
+    use agentos_kernel::mount_table::MountTable;
+    use agentos_kernel::permissions::Permissions;
+    use agentos_kernel::vfs::MemoryFileSystem;
+
+    #[test]
+    fn sidecar_owned_stdin_writer_is_nonblocking() {
+        let mut config = KernelVmConfig::new("vm-nonblocking-stdin-writer");
+        config.permissions = Permissions::allow_all();
+        let mut kernel = SidecarKernel::new(MountTable::new(MemoryFileSystem::new()), config);
+        kernel
+            .register_driver(CommandDriver::new(EXECUTION_DRIVER_NAME, [WASM_COMMAND]))
+            .expect("register execution driver");
+        let process = kernel
+            .spawn_process(
+                WASM_COMMAND,
+                Vec::new(),
+                SpawnOptions {
+                    requester_driver: Some(String::from(EXECUTION_DRIVER_NAME)),
+                    ..SpawnOptions::default()
+                },
+            )
+            .expect("spawn kernel process");
+
+        let writer_fd = install_kernel_stdin_pipe(&mut kernel, process.pid())
+            .expect("install kernel stdin pipe");
+        let flags = kernel
+            .fd_fcntl(
+                EXECUTION_DRIVER_NAME,
+                process.pid(),
+                writer_fd,
+                agentos_kernel::fd_table::F_GETFL,
+                0,
+            )
+            .expect("read stdin writer flags");
+
+        assert_ne!(flags & agentos_kernel::fd_table::O_NONBLOCK, 0);
+    }
 }

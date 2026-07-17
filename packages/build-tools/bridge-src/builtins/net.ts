@@ -1938,6 +1938,11 @@ var NetSocket = class _NetSocket extends CanonicalDuplex {
 		this.capabilityId = handle.capabilityId;
 		this.capabilityGeneration = handle.capabilityGeneration;
 		this._handle = createConnectedSocketHandle(this._socketId);
+		// Native sockets begin reading as soon as they connect, buffering data up
+		// to the stream high-water mark even without a data/readable listener. In
+		// particular, this is required to observe a peer FIN and emit close on a
+		// paused socket. push(false) still clears demand and applies backpressure.
+		this._applicationReadDemand = true;
 		this._applySocketInfo(handle);
 		registerNetSocket(this._socketId, this);
 		this._syncHandleRef();
@@ -2400,11 +2405,16 @@ var NetSocket = class _NetSocket extends CanonicalDuplex {
 		socket.capabilityGeneration = handle.info?.capabilityGeneration;
 		socket._handle = createConnectedSocketHandle(handle.socketId);
 		socket._applySocketInfo(handle.info);
+		socket._applicationReadDemand = true;
 		socket._connected = true;
 		socket.connecting = false;
 		socket.pending = false;
 		registerNetSocket(handle.socketId, socket);
 		socket._syncHandleRef();
+		// Native Node starts the initial libuv read from the Socket constructor.
+		// read(0) reaches _read() without consuming bytes, and push(false) still
+		// stops transport reads at the configured high-water mark.
+		socket.read(0);
 		queueMicrotask(() => {
 			if (!socket.destroyed && !socket._tlsUpgrading) {
 				socket._nextReadPumpOrigin = "acceptedHandle";
@@ -2682,6 +2692,9 @@ var NetSocket = class _NetSocket extends CanonicalDuplex {
 			);
 			this._emitNet("ready");
 			if (!this._tlsUpgrading) {
+				// Node's connect completion calls read(0), which starts EOF
+				// observation even for sockets with only a close listener.
+				this.read(0);
 				this._nextReadPumpOrigin = "connectWait";
 				await this._pumpBridgeReads();
 			}
@@ -3473,6 +3486,8 @@ var NetServer = class {
 		unregisterNetServer(this);
 		this._syncHandleRef();
 		const serverId = this._serverId;
+		const unlinkNodePath =
+			typeof this._address === "string" && !this._address.startsWith("\0");
 		this._serverId = 0;
 		this._address = null;
 		this._pendingTransportCloses += 1;
@@ -3500,7 +3515,9 @@ var NetServer = class {
 			}
 		};
 		try {
-			Promise.resolve(_netServerCloseRaw(serverId)).then(
+			// Node removes a pathname Unix-domain socket when Server.close()
+			// completes. TCP and abstract listeners leave no filesystem path.
+			Promise.resolve(_netServerCloseRaw(serverId, unlinkNodePath)).then(
 				() => finishTransportClose(),
 				finishTransportClose,
 			);

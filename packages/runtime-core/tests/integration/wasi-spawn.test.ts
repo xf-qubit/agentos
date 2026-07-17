@@ -8,12 +8,14 @@
  * Requires WASM binaries built (make wasm in native/wasmvm/).
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { it, expect, beforeEach, afterEach } from 'vitest';
 import { createWasmVmRuntime } from '@rivet-dev/agentos-vm-test-harness';
 import { COMMANDS_DIR, createKernel, describeIf, hasWasmBinaries } from '@rivet-dev/agentos-vm-test-harness';
 import type { Kernel } from '@rivet-dev/agentos-vm-test-harness';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+const hasCodexExec = existsSync(resolve(COMMANDS_DIR, 'codex-exec'));
 
 function skipReason(): string | false {
   if (!hasWasmBinaries) return 'WASM binaries not built (run make wasm in native/wasmvm/)';
@@ -147,7 +149,7 @@ describeIf(!skipReason(), 'wasi-spawn: WasiChild host_process integration', { ti
     expect(result.stdout).toContain('PASS');
   });
 
-  it('codex-exec headless prompt mode exits cleanly', async () => {
+  it.skipIf(!hasCodexExec)('codex-exec headless prompt mode exits cleanly', async () => {
     const result = await kernel.exec('codex-exec echo hello');
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toContain('prompt received');

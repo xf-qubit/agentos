@@ -988,8 +988,64 @@ fn kernel_fd_surface_supports_nonblocking_pipe_duplicates_via_dev_fd() {
         )
         .expect("fill pipe buffer");
     assert_kernel_error_code(
+        kernel.fd_write_nonblocking("shell", process.pid(), write_fd, &[8]),
+        "EAGAIN",
+    );
+    assert_eq!(
+        kernel
+            .fd_stat("shell", process.pid(), write_fd)
+            .expect("stat logically blocking writer after nonblocking attempt")
+            .flags
+            & O_NONBLOCK,
+        0,
+        "host-side cooperative writes must not change guest fd flags"
+    );
+    assert_kernel_error_code(
         kernel.fd_write("shell", process.pid(), nonblocking_write_fd, &[8]),
         "EAGAIN",
+    );
+
+    process.finish(0);
+    kernel.waitpid(process.pid()).expect("wait for shell");
+}
+
+#[test]
+fn trusted_nonblocking_pipe_write_does_not_change_guest_flags() {
+    let mut config = KernelVmConfig::new("vm-api-trusted-nonblock");
+    config.permissions = Permissions::allow_all();
+    let mut kernel = KernelVm::new(MemoryFileSystem::new(), config);
+    kernel
+        .register_driver(CommandDriver::new("shell", ["sh"]))
+        .expect("register shell");
+
+    let process = spawn_shell(&mut kernel);
+    let (_read_fd, write_fd) = kernel.open_pipe("shell", process.pid()).expect("open pipe");
+    kernel
+        .fd_write(
+            "shell",
+            process.pid(),
+            write_fd,
+            &vec![7; MAX_PIPE_BUFFER_BYTES],
+        )
+        .expect("fill pipe buffer");
+
+    assert_eq!(
+        kernel
+            .fd_fcntl("shell", process.pid(), write_fd, F_GETFL, 0)
+            .expect("read guest-visible flags")
+            & O_NONBLOCK,
+        0
+    );
+    assert_kernel_error_code(
+        kernel.fd_write_nonblocking("shell", process.pid(), write_fd, &[8]),
+        "EAGAIN",
+    );
+    assert_eq!(
+        kernel
+            .fd_fcntl("shell", process.pid(), write_fd, F_GETFL, 0)
+            .expect("read flags after trusted write")
+            & O_NONBLOCK,
+        0
     );
 
     process.finish(0);
