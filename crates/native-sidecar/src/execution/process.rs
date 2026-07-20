@@ -152,6 +152,8 @@ impl ActiveProcess {
             next_udp_socket_id: 0,
             python_sockets: BTreeMap::new(),
             next_python_socket_id: 0,
+            hash_sessions: BTreeMap::new(),
+            next_hash_session_id: 0,
             cipher_sessions: BTreeMap::new(),
             next_cipher_session_id: 0,
             diffie_hellman_sessions: BTreeMap::new(),
@@ -1529,6 +1531,10 @@ impl ActiveExecution {
             Self::Wasm(execution) => execution.uses_shared_v8_runtime(),
             Self::Binding(_) => false,
         }
+    }
+
+    pub(crate) fn has_exited(&self) -> bool {
+        matches!(self, Self::Javascript(execution) if execution.has_exited())
     }
 
     pub(crate) fn child_pid(&self) -> u32 {

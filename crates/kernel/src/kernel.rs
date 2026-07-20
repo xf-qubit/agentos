@@ -1207,6 +1207,27 @@ impl<F: VirtualFileSystem + 'static> KernelVm<F> {
         )?)
     }
 
+    pub fn pread_file_for_process(
+        &mut self,
+        requester_driver: &str,
+        pid: u32,
+        path: &str,
+        offset: u64,
+        length: usize,
+    ) -> KernelResult<Vec<u8>> {
+        self.assert_not_terminated()?;
+        self.assert_driver_owns(requester_driver, pid)?;
+        self.check_dac_access(pid, path, DAC_READ)?;
+        self.reject_unix_socket_data_path(path, "ENXIO")?;
+        self.resources.check_pread_length(length)?;
+        Ok(VirtualFileSystem::pread(
+            &mut self.filesystem,
+            path,
+            offset,
+            length,
+        )?)
+    }
+
     pub fn read_file_for_process(
         &mut self,
         requester_driver: &str,

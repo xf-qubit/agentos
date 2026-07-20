@@ -436,6 +436,40 @@ fn apply_host_path_utimens(
     })
 }
 
+fn apply_host_file_utimens(
+    file: &fs::File,
+    atime: VirtualUtimeSpec,
+    mtime: VirtualUtimeSpec,
+    context: &str,
+) -> Result<(), SidecarError> {
+    let existing = match (atime, mtime) {
+        (VirtualUtimeSpec::Omit, _) | (_, VirtualUtimeSpec::Omit) => {
+            let metadata = file
+                .metadata()
+                .map_err(|error| SidecarError::Io(format!("{context}: failed to stat: {error}")))?;
+            Some((
+                metadata_timespec(&metadata, true)?,
+                metadata_timespec(&metadata, false)?,
+            ))
+        }
+        _ => None,
+    };
+    let existing_atime = existing
+        .as_ref()
+        .map(|(atime, _)| *atime)
+        .unwrap_or(VirtualTimeSpec { sec: 0, nsec: 0 });
+    let existing_mtime = existing
+        .as_ref()
+        .map(|(_, mtime)| *mtime)
+        .unwrap_or(VirtualTimeSpec { sec: 0, nsec: 0 });
+    nix::sys::stat::futimens(
+        file.as_raw_fd(),
+        &resolve_host_utime(atime, existing_atime),
+        &resolve_host_utime(mtime, existing_mtime),
+    )
+    .map_err(|error| SidecarError::Io(format!("{context}: failed to set times: {error}")))
+}
+
 pub(crate) async fn guest_filesystem_call<B>(
     sidecar: &mut NativeSidecar<B>,
     request: &RequestFrame,
@@ -2884,6 +2918,30 @@ pub(crate) fn service_javascript_fs_sync_rpc(
             let fd = javascript_sync_rpc_arg_u32(&request.args, 0, "filesystem futimes fd")?;
             let atime = parse_utime_arg(&request.args, 1, "filesystem futimes atime")?;
             let mtime = parse_utime_arg(&request.args, 2, "filesystem futimes mtime")?;
+            if let Some(mapped) = process.mapped_host_fd(fd) {
+                if let Some(guest_path) = mapped.guest_path.as_deref() {
+                    let result = kernel.utimes_spec_for_process(
+                        EXECUTION_DRIVER_NAME,
+                        kernel_pid,
+                        guest_path,
+                        atime,
+                        mtime,
+                        true,
+                    );
+                    if let Err(error) = result {
+                        if error.code() != "ENOENT" {
+                            return Err(kernel_error(error));
+                        }
+                    }
+                }
+                return apply_host_file_utimens(
+                    &mapped.file,
+                    atime,
+                    mtime,
+                    &format!("failed to update mapped guest fd {fd} times"),
+                )
+                .map(|()| Value::Null);
+            }
             kernel
                 .futimes(EXECUTION_DRIVER_NAME, kernel_pid, fd, atime, mtime)
                 .map(|()| Value::Null)
@@ -2913,7 +2971,7 @@ fn kernel_fd_surfaces_stdio_event(
     ))
 }
 
-fn javascript_sync_rpc_path_arg(
+pub(crate) fn javascript_sync_rpc_path_arg(
     process: &ActiveProcess,
     args: &[Value],
     index: usize,
@@ -3197,6 +3255,11 @@ fn mapped_runtime_host_path(
         .unwrap_or_default();
 
     for (guest_root, host_root) in sorted_mappings {
+        let normalized_host_root = if host_root.is_absolute() {
+            normalize_host_path(&host_root)
+        } else {
+            normalize_host_path(&std::env::current_dir().ok()?.join(host_root))
+        };
         if guest_root != "/"
             && normalized != guest_root
             && !normalized.starts_with(&format!("{guest_root}/"))
@@ -3204,6 +3267,22 @@ fn mapped_runtime_host_path(
             continue;
         }
         if guest_root == "/" && !normalized.starts_with('/') {
+            continue;
+        }
+        if process.runtime == GuestRuntimeKind::JavaScript
+            && process.shadow_root.as_ref().is_some_and(|shadow_root| {
+                guest_root == "/"
+                    || normalized_host_root.starts_with(normalize_host_path(shadow_root))
+            })
+        {
+            // Embedded JavaScript is kernel-backed. The root host mapping is a
+            // staging shadow for runtimes that execute against host paths, not
+            // an independent filesystem namespace. Child cwd mappings inside
+            // that shadow are staging paths too. Let JavaScript read and write
+            // the shared kernel VFS so a file created after fork is immediately
+            // visible to every process in the VM. More-specific mappings to
+            // explicit host_dir/module_access roots outside the shadow remain
+            // host-backed.
             continue;
         }
         if guest_root == "/"
@@ -3219,11 +3298,6 @@ fn mapped_runtime_host_path(
             continue;
         }
 
-        let normalized_host_root = if host_root.is_absolute() {
-            normalize_host_path(&host_root)
-        } else {
-            normalize_host_path(&std::env::current_dir().ok()?.join(host_root))
-        };
         let suffix = if guest_root == "/" {
             normalized.trim_start_matches('/')
         } else {

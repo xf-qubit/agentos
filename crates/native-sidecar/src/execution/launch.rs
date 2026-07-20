@@ -421,6 +421,27 @@ pub(super) fn resolve_javascript_command_entrypoint(
     )
 }
 
+/// Resolve the main module filename the same way Node does by default.
+///
+/// npm and other package managers expose binaries as symlinks under `.bin`.
+/// Node dereferences the main-module symlink unless
+/// `--preserve-symlinks-main` was requested; module-relative loads and
+/// `__dirname` must therefore use the target package path, not the `.bin`
+/// link. Prefer the kernel's live view because guest package installation may
+/// have created the symlink after the process shadow was initialized.
+pub(super) fn resolve_javascript_main_entrypoint(
+    vm: &VmState,
+    guest_entrypoint: &str,
+) -> (String, PathBuf) {
+    let resolved_guest_entrypoint = vm
+        .kernel
+        .realpath(guest_entrypoint)
+        .map(|path| normalize_path(&path))
+        .unwrap_or_else(|_| normalize_path(guest_entrypoint));
+    let resolved_host_entrypoint = resolve_vm_guest_path_to_host(vm, &resolved_guest_entrypoint);
+    (resolved_guest_entrypoint, resolved_host_entrypoint)
+}
+
 fn resolve_javascript_command_entrypoint_inner(
     vm: &VmState,
     guest_entrypoint: &str,
@@ -941,15 +962,21 @@ pub(super) fn sync_process_host_writes_to_kernel(
     vm: &mut VmState,
     process: &ActiveProcess,
 ) -> Result<(), SidecarError> {
-    sync_process_host_roots_to_kernel(vm, &process.host_cwd, &process.guest_cwd)
+    sync_process_host_roots_to_kernel(
+        vm,
+        &process.host_cwd,
+        &process.guest_cwd,
+        process.runtime != GuestRuntimeKind::JavaScript,
+    )
 }
 
 pub(super) fn sync_process_host_roots_to_kernel(
     vm: &mut VmState,
     process_host_cwd: &Path,
     process_guest_cwd: &str,
+    sync_root_shadow: bool,
 ) -> Result<(), SidecarError> {
-    if vm.root_filesystem_mode != RootFilesystemMode::ReadOnly {
+    if sync_root_shadow && vm.root_filesystem_mode != RootFilesystemMode::ReadOnly {
         sync_vm_shadow_root_to_kernel(vm)?;
     }
 
@@ -1422,7 +1449,8 @@ fn should_skip_shadow_sync_path(vm: &VmState, guest_path: &str) -> bool {
         // syncing them would overwrite memory/plugin state (or fail on a
         // read-only mount) and deleting them must not unmount guest data.
         || vm.configuration.mounts.iter().any(|mount| {
-            guest_path_is_at_or_below(guest_path, &mount.guest_path)
+            normalize_path(&mount.guest_path) != "/"
+                && guest_path_is_at_or_below(guest_path, &mount.guest_path)
         })
 }
 
@@ -1630,6 +1658,61 @@ pub(super) struct ResolvedHostNodeCliEntrypoint {
     pub(super) package_root: PathBuf,
 }
 
+const MAX_NODE_CLI_SHIM_BYTES: u64 = 16 * 1024;
+
+fn is_npm_cli_entrypoint(path: &Path) -> bool {
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    if !matches!(file_name, "npm-cli.js" | "npx-cli.js") {
+        return false;
+    }
+    let Some(package_root) = path.parent().and_then(Path::parent) else {
+        return false;
+    };
+    package_root.join("package.json").is_file() && package_root.join("lib/npm.js").is_file()
+}
+
+fn node_cli_target_from_shim(script: &str, home: &Path, shim_directory: &Path) -> Option<PathBuf> {
+    script.split_ascii_whitespace().find_map(|token| {
+        let token = token.trim_matches(|ch| matches!(ch, '"' | '\'' | ';'));
+        let expanded = token
+            .strip_prefix("$HOME/")
+            .or_else(|| token.strip_prefix("${HOME}/"))
+            .map(|relative| home.join(relative))
+            .or_else(|| {
+                token
+                    .strip_prefix("$basedir/")
+                    .or_else(|| token.strip_prefix("${basedir}/"))
+                    .map(|relative| shim_directory.join(relative))
+            })
+            .unwrap_or_else(|| PathBuf::from(token));
+        let expanded = expanded.canonicalize().ok().unwrap_or(expanded);
+        is_npm_cli_entrypoint(&expanded).then_some(expanded)
+    })
+}
+
+fn resolve_node_cli_entrypoint(candidate: &Path) -> Option<PathBuf> {
+    let direct = candidate
+        .canonicalize()
+        .ok()
+        .unwrap_or_else(|| candidate.to_path_buf());
+    if is_npm_cli_entrypoint(&direct) {
+        return Some(direct);
+    }
+
+    let metadata = candidate.metadata().ok()?;
+    if metadata.len() > MAX_NODE_CLI_SHIM_BYTES {
+        return None;
+    }
+    let script = std::fs::read_to_string(candidate).ok()?;
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let shim_directory = candidate.parent()?;
+    let target = node_cli_target_from_shim(&script, &home, shim_directory)?;
+    let target = target.canonicalize().ok().unwrap_or(target);
+    is_npm_cli_entrypoint(&target).then_some(target)
+}
+
 pub(super) fn resolve_host_node_cli_entrypoint(
     command: &str,
 ) -> Option<ResolvedHostNodeCliEntrypoint> {
@@ -1644,7 +1727,9 @@ pub(super) fn resolve_host_node_cli_entrypoint(
         if !candidate.is_file() {
             continue;
         }
-        let entrypoint = candidate.canonicalize().ok().unwrap_or(candidate);
+        let Some(entrypoint) = resolve_node_cli_entrypoint(&candidate) else {
+            continue;
+        };
         let package_root = entrypoint.parent()?.parent()?.to_path_buf();
         let guest_root = format!("/__secure_exec/node-runtime/{command_name}");
         let relative_entrypoint = entrypoint.strip_prefix(&package_root).ok()?;
@@ -1663,6 +1748,87 @@ pub(super) fn resolve_host_node_cli_entrypoint(
     None
 }
 
+#[cfg(test)]
+mod node_cli_shim_tests {
+    use super::{
+        build_host_node_cli_eval, node_cli_target_from_shim, ResolvedHostNodeCliEntrypoint,
+    };
+    use std::{fs, path::PathBuf, time::SystemTime};
+
+    #[test]
+    fn expands_home_in_npm_shell_shim() {
+        let nonce = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos();
+        let home = std::env::temp_dir().join(format!(
+            "agentos-node-cli-shim-{}-{nonce}",
+            std::process::id()
+        ));
+        let package_root = home.join("node_modules/npm");
+        fs::create_dir_all(package_root.join("bin")).expect("create npm bin");
+        fs::create_dir_all(package_root.join("lib")).expect("create npm lib");
+        fs::write(package_root.join("package.json"), "{}").expect("write package json");
+        fs::write(package_root.join("lib/npm.js"), "").expect("write npm main");
+        fs::write(package_root.join("bin/npm-cli.js"), "").expect("write npm cli");
+
+        let target = node_cli_target_from_shim(
+            "#!/bin/sh\nexec node \"$HOME/node_modules/npm/bin/npm-cli.js\" \"$@\"\n",
+            &home,
+            &home.join("bin"),
+        );
+
+        assert_eq!(target, Some(package_root.join("bin/npm-cli.js")));
+        fs::remove_dir_all(home).expect("remove npm shim fixture");
+    }
+
+    #[test]
+    fn expands_pnpm_basedir_in_npm_shell_shim() {
+        let nonce = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "agentos-pnpm-node-cli-shim-{}-{nonce}",
+            std::process::id()
+        ));
+        let shim_directory = root.join("node_modules/.bin");
+        let package_root = root.join("node_modules/npm");
+        fs::create_dir_all(&shim_directory).expect("create shim directory");
+        fs::create_dir_all(package_root.join("bin")).expect("create npm bin");
+        fs::create_dir_all(package_root.join("lib")).expect("create npm lib");
+        fs::write(package_root.join("package.json"), "{}").expect("write package json");
+        fs::write(package_root.join("lib/npm.js"), "").expect("write npm main");
+        fs::write(package_root.join("bin/npm-cli.js"), "").expect("write npm cli");
+
+        let target = node_cli_target_from_shim(
+            "#!/bin/sh\nexec node \"$basedir/../npm/bin/npm-cli.js\" \"$@\"\n",
+            &root,
+            &shim_directory,
+        );
+
+        assert_eq!(target, Some(package_root.join("bin/npm-cli.js")));
+        fs::remove_dir_all(root).expect("remove pnpm shim fixture");
+    }
+
+    #[test]
+    fn npm_display_stub_filters_buffered_messages_by_configured_loglevel() {
+        let source = build_host_node_cli_eval(&ResolvedHostNodeCliEntrypoint {
+            command_name: String::from("npm"),
+            guest_root: String::from("/opt/agentos/npm"),
+            guest_entrypoint: String::from("/opt/agentos/npm/bin/npm-cli.js"),
+            package_root: PathBuf::from("/opt/agentos/npm"),
+        });
+
+        assert!(source.contains("arg.startsWith('--loglevel=')"));
+        assert!(source.contains("process.env.npm_config_loglevel"));
+        assert!(source.contains("this._logBuffer.push([level, args])"));
+        assert!(source.contains("this._shouldLog(bufferLevel)"));
+        assert!(source.contains("queueMicrotask(() => responseBody.end(responseBuffer))"));
+        assert!(source.contains("queueMicrotask(() => clonedBody.end(clonedBuffer))"));
+    }
+}
+
 pub(super) fn build_host_node_cli_eval(cli: &ResolvedHostNodeCliEntrypoint) -> String {
     let guest_npm_main = normalize_path(&format!("{}/lib/npm.js", cli.guest_root));
     let guest_npm_cli = normalize_path(&format!("{}/bin/npm-cli.js", cli.guest_root));
@@ -1672,13 +1838,13 @@ pub(super) fn build_host_node_cli_eval(cli: &ResolvedHostNodeCliEntrypoint) -> S
         normalize_path(&format!("{}/lib/utils/log-file.js", cli.guest_root));
     let debug_preamble = "const __agentOSDebugNpmCli = !!process.env.CODEX_DEBUG_NPM_CLI; const __agentOSDebugLog = (...args) => { if (__agentOSDebugNpmCli) { console.error('[secure-exec npm debug]', ...args); } }; const __agentOSIsProcessExitError = (error) => !!(error && typeof error === 'object' && (error._isProcessExit === true || error.name === 'ProcessExitError')); const __agentOSResolveExitCode = (code) => Number.isFinite(code) ? code : (Number.isFinite(process.exitCode) ? process.exitCode : 0); const __agentOSFinish = (code) => { process.exitCode = __agentOSResolveExitCode(code); }; if (__agentOSDebugNpmCli) { const __agentOSWrapAsyncFsMethod = (__agentOSTarget, __agentOSMethod) => { const __agentOSOriginal = __agentOSTarget[__agentOSMethod]; if (typeof __agentOSOriginal !== 'function' || __agentOSOriginal.__agentOSDebugWrapped) { return; } const __agentOSWrapped = async (...args) => { const target = args.length > 0 ? args[0] : '<none>'; __agentOSDebugLog(`fs.${__agentOSMethod}:start`, String(target)); try { const result = await __agentOSOriginal.apply(__agentOSTarget, args); __agentOSDebugLog(`fs.${__agentOSMethod}:done`, String(target)); return result; } catch (error) { __agentOSDebugLog(`fs.${__agentOSMethod}:error`, String(target), error && error.stack ? error.stack : String(error)); throw error; } }; __agentOSWrapped.__agentOSDebugWrapped = true; __agentOSTarget[__agentOSMethod] = __agentOSWrapped; }; const __agentOSWrapSyncFsMethod = (__agentOSTarget, __agentOSMethod) => { const __agentOSOriginal = __agentOSTarget[__agentOSMethod]; if (typeof __agentOSOriginal !== 'function' || __agentOSOriginal.__agentOSDebugWrapped) { return; } const __agentOSWrapped = (...args) => { const target = args.length > 0 ? args[0] : '<none>'; __agentOSDebugLog(`fs.${__agentOSMethod}:start`, String(target)); try { const result = __agentOSOriginal.apply(__agentOSTarget, args); __agentOSDebugLog(`fs.${__agentOSMethod}:done`, String(target)); return result; } catch (error) { __agentOSDebugLog(`fs.${__agentOSMethod}:error`, String(target), error && error.stack ? error.stack : String(error)); throw error; } }; __agentOSWrapped.__agentOSDebugWrapped = true; __agentOSTarget[__agentOSMethod] = __agentOSWrapped; }; const __agentOSFsPromiseModules = [require('fs/promises'), require('node:fs/promises')]; for (const __agentOSFsPromises of __agentOSFsPromiseModules) { for (const __agentOSMethod of ['access', 'lstat', 'mkdir', 'open', 'readFile', 'readdir', 'readlink', 'realpath', 'rename', 'rm', 'rmdir', 'stat', 'symlink', 'unlink', 'writeFile']) { __agentOSWrapAsyncFsMethod(__agentOSFsPromises, __agentOSMethod); } } const __agentOSFsModules = [require('fs'), require('node:fs')]; for (const __agentOSFs of __agentOSFsModules) { for (const __agentOSMethod of ['accessSync', 'existsSync', 'lstatSync', 'mkdirSync', 'openSync', 'readFileSync', 'readdirSync', 'readlinkSync', 'realpathSync', 'renameSync', 'rmSync', 'rmdirSync', 'statSync', 'symlinkSync', 'unlinkSync', 'writeFileSync']) { __agentOSWrapSyncFsMethod(__agentOSFs, __agentOSMethod); } } }";
     let display_stub = format!(
-        "const __agentOSDisplayModulePath = require.resolve({display_module}); const __agentOSLogFileModulePath = require.resolve({log_file_module}); const __agentOSColorPassthrough = new Proxy((value) => value, {{ get: () => __agentOSColorPassthrough, apply: (_target, _thisArg, args) => args[0] }}); class __AgentOSNpmDisplayStub {{ constructor() {{ this.chalk = {{ noColor: __agentOSColorPassthrough, stdout: __agentOSColorPassthrough, stderr: __agentOSColorPassthrough }}; this._logPaused = true; this._logBuffer = []; this._outputBuffer = []; this._write = (stream, values) => {{ if (!Array.isArray(values) || values.length === 0) {{ return; }} const text = values.map((value) => typeof value === 'string' ? value : String(value)).join(' '); if (text.length === 0) {{ return; }} const normalized = text.replace(/\\r\\n/g, '\\n'); if (/^\\n?> npx\\n> /u.test(normalized)) {{ return; }} stream.write(text.endsWith('\\n') ? text : `${{text}}\\n`); }}; this._inputHandler = (level, ...args) => {{ if (level !== 'read') {{ return; }} const [resolve, reject, callback] = args; Promise.resolve().then(() => callback()).then(resolve, reject); }}; this._logHandler = (level, ...args) => {{ if (level === 'resume') {{ this._logPaused = false; for (const entry of this._logBuffer.splice(0)) {{ this._write(process.stderr, entry); }} return; }} if (level === 'pause') {{ this._logPaused = true; return; }} if (this._logPaused) {{ this._logBuffer.push(args); return; }} this._write(process.stderr, args); }}; this._outputHandler = (level, ...args) => {{ if (level === 'buffer') {{ this._outputBuffer.push(['standard', args]); return; }} if (level === 'flush') {{ for (const [bufferLevel, bufferArgs] of this._outputBuffer.splice(0)) {{ this._write(bufferLevel === 'error' ? process.stderr : process.stdout, bufferArgs); }} return; }} this._write(level === 'error' ? process.stderr : process.stdout, args); }}; process.on('input', this._inputHandler); process.on('log', this._logHandler); process.on('output', this._outputHandler); }} async load() {{ process.emit('log', 'resume'); process.emit('output', 'flush'); }} off() {{ if (this._inputHandler) {{ process.off('input', this._inputHandler); }} if (this._logHandler) {{ process.off('log', this._logHandler); }} if (this._outputHandler) {{ process.off('output', this._outputHandler); }} this._logBuffer.length = 0; this._outputBuffer.length = 0; }} }} class __AgentOSNpmLogFileStub {{ constructor() {{ this.files = []; }} async load() {{ return []; }} off() {{}} }} globalThis._moduleCache[__agentOSDisplayModulePath] = {{ exports: __AgentOSNpmDisplayStub }}; globalThis._moduleCache[__agentOSLogFileModulePath] = {{ exports: __AgentOSNpmLogFileStub }};",
+        "const __agentOSDisplayModulePath = require.resolve({display_module}); const __agentOSLogFileModulePath = require.resolve({log_file_module}); const __agentOSColorPassthrough = new Proxy((value) => value, {{ get: () => __agentOSColorPassthrough, apply: (_target, _thisArg, args) => args[0] }}); class __AgentOSNpmDisplayStub {{ constructor() {{ this.chalk = {{ noColor: __agentOSColorPassthrough, stdout: __agentOSColorPassthrough, stderr: __agentOSColorPassthrough }}; this._logPaused = true; this._logBuffer = []; this._outputBuffer = []; const levels = {{ silent: 0, error: 1, warn: 2, notice: 3, http: 4, info: 5, verbose: 6, silly: 7 }}; const loglevelIndex = process.argv.findIndex((arg) => arg === '--loglevel' || arg.startsWith('--loglevel=')); const loglevelArg = loglevelIndex < 0 ? undefined : process.argv[loglevelIndex]; const configuredLevel = loglevelArg && loglevelArg.includes('=') ? loglevelArg.slice(loglevelArg.indexOf('=') + 1) : process.argv[loglevelIndex + 1]; this._logThreshold = levels[String(configuredLevel || process.env.npm_config_loglevel || 'notice').toLowerCase()] ?? levels.notice; this._shouldLog = (level) => levels[level] === undefined || levels[level] <= this._logThreshold; this._write = (stream, values) => {{ if (!Array.isArray(values) || values.length === 0) {{ return; }} const text = values.map((value) => typeof value === 'string' ? value : String(value)).join(' '); if (text.length === 0) {{ return; }} const normalized = text.replace(/\\r\\n/g, '\\n'); if (/^\\n?> npx\\n> /u.test(normalized)) {{ return; }} stream.write(text.endsWith('\\n') ? text : `${{text}}\\n`); }}; this._inputHandler = (level, ...args) => {{ if (level !== 'read') {{ return; }} const [resolve, reject, callback] = args; Promise.resolve().then(() => callback()).then(resolve, reject); }}; this._logHandler = (level, ...args) => {{ if (level === 'resume') {{ this._logPaused = false; for (const [bufferLevel, bufferArgs] of this._logBuffer.splice(0)) {{ if (this._shouldLog(bufferLevel)) {{ this._write(process.stderr, bufferArgs); }} }} return; }} if (level === 'pause') {{ this._logPaused = true; return; }} if (!this._shouldLog(level)) {{ return; }} if (this._logPaused) {{ this._logBuffer.push([level, args]); return; }} this._write(process.stderr, args); }}; this._outputHandler = (level, ...args) => {{ if (level === 'buffer') {{ this._outputBuffer.push(['standard', args]); return; }} if (level === 'flush') {{ for (const [bufferLevel, bufferArgs] of this._outputBuffer.splice(0)) {{ this._write(bufferLevel === 'error' ? process.stderr : process.stdout, bufferArgs); }} return; }} this._write(level === 'error' ? process.stderr : process.stdout, args); }}; process.on('input', this._inputHandler); process.on('log', this._logHandler); process.on('output', this._outputHandler); }} async load() {{ process.emit('log', 'resume'); process.emit('output', 'flush'); }} off() {{ if (this._inputHandler) {{ process.off('input', this._inputHandler); }} if (this._logHandler) {{ process.off('log', this._logHandler); }} if (this._outputHandler) {{ process.off('output', this._outputHandler); }} this._logBuffer.length = 0; this._outputBuffer.length = 0; }} }} class __AgentOSNpmLogFileStub {{ constructor() {{ this.files = []; }} async load() {{ return []; }} off() {{}} }} globalThis._moduleCache[__agentOSDisplayModulePath] = {{ exports: __AgentOSNpmDisplayStub }}; globalThis._moduleCache[__agentOSLogFileModulePath] = {{ exports: __AgentOSNpmLogFileStub }};",
         display_module = serde_json::to_string(&guest_display_module)
             .unwrap_or_else(|_| format!("\"{guest_display_module}\"")),
         log_file_module = serde_json::to_string(&guest_log_file_module)
             .unwrap_or_else(|_| format!("\"{guest_log_file_module}\"")),
     );
-    let registry_fetch_stub = "const { createRequire: __agentOSCreateRequire } = require('module'); const __agentOSNpmRequire = __agentOSCreateRequire(require.resolve(__AGENTOS_NPM_MAIN__)); try { const __agentOSMinipassFetchPath = __agentOSNpmRequire.resolve('minipass-fetch'); const __agentOSMinipassFetch = __agentOSNpmRequire(__agentOSMinipassFetchPath); const { FetchError: __agentOSFetchError, Headers: __agentOSFetchHeaders, Request: __agentOSFetchRequest, Response: __agentOSFetchResponse, AbortError: __agentOSAbortError } = __agentOSMinipassFetch; const { Minipass: __agentOSMinipass } = __agentOSNpmRequire('minipass'); const __agentOSCreateBinaryMinipass = () => new __agentOSMinipass({ objectMode: false, encoding: null }); const __agentOSCloneBuffer = (buffer) => Buffer.isBuffer(buffer) ? Buffer.from(buffer) : Buffer.from(buffer ?? []); const __agentOSBufferToArrayBuffer = (buffer) => { const bytes = __agentOSCloneBuffer(buffer); return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength); }; const __agentOSAttachBufferedBodyMethods = (response, responseBuffer) => { const __agentOSReadBuffer = async () => __agentOSCloneBuffer(responseBuffer); response.__agentOSBufferedBody = __agentOSCloneBuffer(responseBuffer); response.buffer = __agentOSReadBuffer; response.text = async () => (await __agentOSReadBuffer()).toString('utf8'); response.json = async () => JSON.parse(await response.text()); response.arrayBuffer = async () => __agentOSBufferToArrayBuffer(await __agentOSReadBuffer()); response.clone = () => { const clonedBody = __agentOSCreateBinaryMinipass(); const clonedBuffer = __agentOSCloneBuffer(responseBuffer); clonedBody.end(clonedBuffer); const clonedResponse = new __agentOSFetchResponse(clonedBody, { url: response.url, status: response.status, statusText: response.statusText, headers: response.headers, size: response.size, timeout: response.timeout, counter: response.counter, trailer: response.trailer }); return __agentOSAttachBufferedBodyMethods(clonedResponse, clonedBuffer); }; return response; }; const __agentOSNormalizeHeaders = (__agentOSHeaders) => { const normalized = {}; __agentOSHeaders.forEach((value, key) => { if (normalized[key] === undefined) { normalized[key] = value; return; } if (Array.isArray(normalized[key])) { normalized[key].push(value); return; } normalized[key] = [normalized[key], value]; }); return normalized; }; const __agentOSPatchedMinipassFetch = async (input, opts = {}) => { const request = input instanceof __agentOSFetchRequest ? input : new __agentOSFetchRequest(input, opts); const __agentOSController = !request.signal && typeof AbortController === 'function' ? new AbortController() : null; const __agentOSSignal = request.signal ?? __agentOSController?.signal; let __agentOSTimer = null; if (__agentOSController && Number.isFinite(request.timeout) && request.timeout > 0) { __agentOSTimer = setTimeout(() => __agentOSController.abort(new Error(`network timeout at: ${request.url}`)), request.timeout); __agentOSTimer.unref?.(); } try { const requestHeaders = {}; request.headers.forEach((value, key) => { requestHeaders[key] = value; }); const response = await fetch(request.url, { method: request.method, headers: requestHeaders, body: request.body ?? undefined, redirect: request.redirect ?? opts.redirect ?? 'follow', signal: __agentOSSignal, ...(request.body ? { duplex: 'half' } : {}) }); const responseBody = __agentOSCreateBinaryMinipass(); const contentType = String(response.headers.get('content-type') || '').toLowerCase(); const responseBuffer = contentType.includes('json') ? Buffer.from(JSON.stringify(await response.json())) : contentType.startsWith('text/') ? Buffer.from(await response.text()) : Buffer.from(await response.arrayBuffer()); responseBody.end(responseBuffer); return __agentOSAttachBufferedBodyMethods(new __agentOSFetchResponse(responseBody, { url: response.url, status: response.status, statusText: response.statusText, headers: __agentOSNormalizeHeaders(response.headers), size: request.size, timeout: request.timeout, counter: request.counter ?? opts.counter ?? 0, trailer: Promise.resolve(new __agentOSFetchHeaders()) }), responseBuffer); } catch (error) { if (error instanceof Error) { throw error; } throw new __agentOSFetchError(String(error), 'system', error); } finally { if (__agentOSTimer) { clearTimeout(__agentOSTimer); } } }; globalThis.__agentOSPatchedMinipassFetch = __agentOSPatchedMinipassFetch; __agentOSPatchedMinipassFetch.isRedirect = typeof __agentOSMinipassFetch.isRedirect === 'function' ? __agentOSMinipassFetch.isRedirect.bind(__agentOSMinipassFetch) : (code) => code === 301 || code === 302 || code === 303 || code === 307 || code === 308; __agentOSPatchedMinipassFetch.FetchError = __agentOSFetchError; __agentOSPatchedMinipassFetch.Headers = __agentOSFetchHeaders; __agentOSPatchedMinipassFetch.Request = __agentOSFetchRequest; __agentOSPatchedMinipassFetch.Response = __agentOSFetchResponse; __agentOSPatchedMinipassFetch.AbortError = __agentOSAbortError; globalThis._moduleCache[__agentOSMinipassFetchPath] = { exports: __agentOSPatchedMinipassFetch }; __agentOSDebugLog('patched-minipass-fetch', __agentOSMinipassFetchPath); const __agentOSCheckResponsePath = __agentOSNpmRequire.resolve('npm-registry-fetch/lib/check-response.js'); const __agentOSCheckResponse = __agentOSNpmRequire(__agentOSCheckResponsePath); const __agentOSEnsureResponseBodyStream = (response) => { if (!response || (response.body && typeof response.body.on === 'function')) { return response; } const body = __agentOSCreateBinaryMinipass(); const finishWithError = (error) => body.emit('error', error instanceof Error ? error : new Error(String(error))); try { if (typeof response.buffer === 'function') { Promise.resolve(response.buffer()).then((buffer) => body.end(buffer), finishWithError); } else if (Buffer.isBuffer(response.body) || typeof response.body === 'string') { body.end(response.body); } else if (response.body && typeof response.body[Symbol.asyncIterator] === 'function') { (async () => { try { for await (const chunk of response.body) { body.write(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)); } body.end(); } catch (error) { finishWithError(error); body.end(); } })(); } else { body.end(); } } catch (error) { finishWithError(error); body.end(); } return new __agentOSFetchResponse(body, response); }; globalThis._moduleCache[__agentOSCheckResponsePath] = { exports: (payload) => { const normalized = { ...payload, res: __agentOSEnsureResponseBodyStream(payload.res) }; __agentOSDebugLog('check-response-body', normalized.res && normalized.res.status, typeof (normalized.res && normalized.res.body), normalized.res && normalized.res.body && typeof normalized.res.body.on, normalized.res && normalized.res.body && normalized.res.body.constructor && normalized.res.body.constructor.name, !!(normalized.res && normalized.res.__agentOSBufferedBody), normalized.res && typeof normalized.res.json); return __agentOSCheckResponse(normalized); } }; __agentOSDebugLog('patched-check-response', __agentOSCheckResponsePath); } catch (error) { __agentOSDebugLog('patch-minipass-fetch-failed', error && error.stack ? error.stack : String(error)); } try { const __agentOSRegistryFetchPath = __agentOSNpmRequire.resolve('npm-registry-fetch'); const __agentOSRegistryFetch = __agentOSNpmRequire(__agentOSRegistryFetchPath); const __agentOSWrapRegistryFetch = (fn) => { const wrapResult = (promise) => Promise.resolve(promise).then((res) => { __agentOSDebugLog('registry-fetch-result', res && res.status, typeof (res && res.body), res && res.body && typeof res.body.on, res && res.body && res.body.constructor && res.body.constructor.name, !!(res && res.__agentOSBufferedBody), res && typeof res.json); return res; }); const wrapped = (uri, opts = {}) => wrapResult(globalThis.__agentOSPatchedMinipassFetch(uri, { method: opts.method, headers: opts.headers, body: opts.body, redirect: opts.redirect, signal: opts.signal, timeout: opts.timeout, size: opts.size, counter: opts.counter })); if (typeof fn.json === 'function') { wrapped.json = (uri, opts = {}) => wrapped(uri, opts).then((res) => res.json()); } if (fn.json && typeof fn.json.stream === 'function') { wrapped.json = wrapped.json || {}; wrapped.json.stream = (uri, path, opts = {}) => fn.json.stream(uri, path, { ...opts, agent: false }); } if (typeof fn.pickRegistry === 'function') { wrapped.pickRegistry = fn.pickRegistry.bind(fn); } if (typeof fn.getAuth === 'function') { wrapped.getAuth = fn.getAuth.bind(fn); } return wrapped; }; globalThis._moduleCache[__agentOSRegistryFetchPath] = { exports: __agentOSWrapRegistryFetch(__agentOSRegistryFetch) }; __agentOSDebugLog('patched-npm-registry-fetch', __agentOSRegistryFetchPath); } catch (error) { __agentOSDebugLog('patch-npm-registry-fetch-failed', error && error.stack ? error.stack : String(error)); }";
+    let registry_fetch_stub = "const { createRequire: __agentOSCreateRequire } = require('module'); const __agentOSNpmRequire = __agentOSCreateRequire(require.resolve(__AGENTOS_NPM_MAIN__)); try { const __agentOSMinipassFetchPath = __agentOSNpmRequire.resolve('minipass-fetch'); const __agentOSMinipassFetch = __agentOSNpmRequire(__agentOSMinipassFetchPath); const { FetchError: __agentOSFetchError, Headers: __agentOSFetchHeaders, Request: __agentOSFetchRequest, Response: __agentOSFetchResponse, AbortError: __agentOSAbortError } = __agentOSMinipassFetch; const { Minipass: __agentOSMinipass } = __agentOSNpmRequire('minipass'); const __agentOSCreateBinaryMinipass = () => new __agentOSMinipass({ objectMode: false, encoding: null }); const __agentOSCloneBuffer = (buffer) => Buffer.isBuffer(buffer) ? Buffer.from(buffer) : Buffer.from(buffer ?? []); const __agentOSBufferToArrayBuffer = (buffer) => { const bytes = __agentOSCloneBuffer(buffer); return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength); }; const __agentOSAttachBufferedBodyMethods = (response, responseBuffer) => { const __agentOSReadBuffer = async () => __agentOSCloneBuffer(responseBuffer); response.__agentOSBufferedBody = __agentOSCloneBuffer(responseBuffer); response.buffer = __agentOSReadBuffer; response.text = async () => (await __agentOSReadBuffer()).toString('utf8'); response.json = async () => JSON.parse(await response.text()); response.arrayBuffer = async () => __agentOSBufferToArrayBuffer(await __agentOSReadBuffer()); response.clone = () => { const clonedBody = __agentOSCreateBinaryMinipass(); const clonedBuffer = __agentOSCloneBuffer(responseBuffer); queueMicrotask(() => clonedBody.end(clonedBuffer)); const clonedResponse = new __agentOSFetchResponse(clonedBody, { url: response.url, status: response.status, statusText: response.statusText, headers: response.headers, size: response.size, timeout: response.timeout, counter: response.counter, trailer: response.trailer }); return __agentOSAttachBufferedBodyMethods(clonedResponse, clonedBuffer); }; return response; }; const __agentOSNormalizeHeaders = (__agentOSHeaders) => { const normalized = {}; __agentOSHeaders.forEach((value, key) => { if (normalized[key] === undefined) { normalized[key] = value; return; } if (Array.isArray(normalized[key])) { normalized[key].push(value); return; } normalized[key] = [normalized[key], value]; }); return normalized; }; const __agentOSPatchedMinipassFetch = async (input, opts = {}) => { const request = input instanceof __agentOSFetchRequest ? input : new __agentOSFetchRequest(input, opts); const __agentOSController = !request.signal && typeof AbortController === 'function' ? new AbortController() : null; const __agentOSSignal = request.signal ?? __agentOSController?.signal; let __agentOSTimer = null; if (__agentOSController && Number.isFinite(request.timeout) && request.timeout > 0) { __agentOSTimer = setTimeout(() => __agentOSController.abort(new Error(`network timeout at: ${request.url}`)), request.timeout); __agentOSTimer.unref?.(); } try { const requestHeaders = {}; request.headers.forEach((value, key) => { requestHeaders[key] = value; }); const response = await fetch(request.url, { method: request.method, headers: requestHeaders, body: request.body ?? undefined, redirect: request.redirect ?? opts.redirect ?? 'follow', signal: __agentOSSignal, ...(request.body ? { duplex: 'half' } : {}) }); const responseBody = __agentOSCreateBinaryMinipass(); const contentType = String(response.headers.get('content-type') || '').toLowerCase(); const responseBuffer = contentType.includes('json') ? Buffer.from(JSON.stringify(await response.json())) : contentType.startsWith('text/') ? Buffer.from(await response.text()) : Buffer.from(await response.arrayBuffer()); queueMicrotask(() => responseBody.end(responseBuffer)); return __agentOSAttachBufferedBodyMethods(new __agentOSFetchResponse(responseBody, { url: response.url, status: response.status, statusText: response.statusText, headers: __agentOSNormalizeHeaders(response.headers), size: request.size, timeout: request.timeout, counter: request.counter ?? opts.counter ?? 0, trailer: Promise.resolve(new __agentOSFetchHeaders()) }), responseBuffer); } catch (error) { if (error instanceof Error) { throw error; } throw new __agentOSFetchError(String(error), 'system', error); } finally { if (__agentOSTimer) { clearTimeout(__agentOSTimer); } } }; globalThis.__agentOSPatchedMinipassFetch = __agentOSPatchedMinipassFetch; __agentOSPatchedMinipassFetch.isRedirect = typeof __agentOSMinipassFetch.isRedirect === 'function' ? __agentOSMinipassFetch.isRedirect.bind(__agentOSMinipassFetch) : (code) => code === 301 || code === 302 || code === 303 || code === 307 || code === 308; __agentOSPatchedMinipassFetch.FetchError = __agentOSFetchError; __agentOSPatchedMinipassFetch.Headers = __agentOSFetchHeaders; __agentOSPatchedMinipassFetch.Request = __agentOSFetchRequest; __agentOSPatchedMinipassFetch.Response = __agentOSFetchResponse; __agentOSPatchedMinipassFetch.AbortError = __agentOSAbortError; globalThis._moduleCache[__agentOSMinipassFetchPath] = { exports: __agentOSPatchedMinipassFetch }; __agentOSDebugLog('patched-minipass-fetch', __agentOSMinipassFetchPath); const __agentOSCheckResponsePath = __agentOSNpmRequire.resolve('npm-registry-fetch/lib/check-response.js'); const __agentOSCheckResponse = __agentOSNpmRequire(__agentOSCheckResponsePath); const __agentOSEnsureResponseBodyStream = (response) => { if (!response || (response.body && typeof response.body.on === 'function')) { return response; } const body = __agentOSCreateBinaryMinipass(); const finishWithError = (error) => body.emit('error', error instanceof Error ? error : new Error(String(error))); try { if (typeof response.buffer === 'function') { Promise.resolve(response.buffer()).then((buffer) => body.end(buffer), finishWithError); } else if (Buffer.isBuffer(response.body) || typeof response.body === 'string') { body.end(response.body); } else if (response.body && typeof response.body[Symbol.asyncIterator] === 'function') { (async () => { try { for await (const chunk of response.body) { body.write(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)); } body.end(); } catch (error) { finishWithError(error); body.end(); } })(); } else { body.end(); } } catch (error) { finishWithError(error); body.end(); } return new __agentOSFetchResponse(body, response); }; globalThis._moduleCache[__agentOSCheckResponsePath] = { exports: (payload) => { const normalized = { ...payload, res: __agentOSEnsureResponseBodyStream(payload.res) }; __agentOSDebugLog('check-response-body', normalized.res && normalized.res.status, typeof (normalized.res && normalized.res.body), normalized.res && normalized.res.body && typeof normalized.res.body.on, normalized.res && normalized.res.body && normalized.res.body.constructor && normalized.res.body.constructor.name, !!(normalized.res && normalized.res.__agentOSBufferedBody), normalized.res && typeof normalized.res.json); return __agentOSCheckResponse(normalized); } }; __agentOSDebugLog('patched-check-response', __agentOSCheckResponsePath); } catch (error) { __agentOSDebugLog('patch-minipass-fetch-failed', error && error.stack ? error.stack : String(error)); } try { const __agentOSRegistryFetchPath = __agentOSNpmRequire.resolve('npm-registry-fetch'); const __agentOSRegistryFetch = __agentOSNpmRequire(__agentOSRegistryFetchPath); const __agentOSWrapRegistryFetch = (fn) => { const wrapResult = (promise) => Promise.resolve(promise).then((res) => { __agentOSDebugLog('registry-fetch-result', res && res.status, typeof (res && res.body), res && res.body && typeof res.body.on, res && res.body && res.body.constructor && res.body.constructor.name, !!(res && res.__agentOSBufferedBody), res && typeof res.json); return res; }); const wrapped = (uri, opts = {}) => wrapResult(globalThis.__agentOSPatchedMinipassFetch(uri, { method: opts.method, headers: opts.headers, body: opts.body, redirect: opts.redirect, signal: opts.signal, timeout: opts.timeout, size: opts.size, counter: opts.counter })); if (typeof fn.json === 'function') { wrapped.json = (uri, opts = {}) => wrapped(uri, opts).then((res) => res.json()); } if (fn.json && typeof fn.json.stream === 'function') { wrapped.json = wrapped.json || {}; wrapped.json.stream = (uri, path, opts = {}) => fn.json.stream(uri, path, { ...opts, agent: false }); } if (typeof fn.pickRegistry === 'function') { wrapped.pickRegistry = fn.pickRegistry.bind(fn); } if (typeof fn.getAuth === 'function') { wrapped.getAuth = fn.getAuth.bind(fn); } return wrapped; }; globalThis._moduleCache[__agentOSRegistryFetchPath] = { exports: __agentOSWrapRegistryFetch(__agentOSRegistryFetch) }; __agentOSDebugLog('patched-npm-registry-fetch', __agentOSRegistryFetchPath); } catch (error) { __agentOSDebugLog('patch-npm-registry-fetch-failed', error && error.stack ? error.stack : String(error)); }";
     match cli.command_name.as_str() {
         "npx" => format!(
             "{debug_preamble} {display_stub} {registry_fetch_stub} process.argv[1] = require.resolve({npm_cli}); process.argv.splice(2, 0, 'exec'); __agentOSDebugLog('argv', JSON.stringify(process.argv), 'cwd', process.cwd()); (async () => {{ const pkg = require({package_json}); if (process.argv.includes('--version') || process.argv.includes('-v')) {{ __agentOSDebugLog('version-shortcut'); console.log(pkg.version); __agentOSFinish(0); return; }} const Npm = require({npm_main}); const npm = new Npm(); __agentOSDebugLog('before-load'); const loaded = await npm.load(); __agentOSDebugLog('after-load', loaded && loaded.command, JSON.stringify(loaded && loaded.args)); if (!loaded.exec) {{ __agentOSDebugLog('no-exec'); __agentOSFinish(); return; }} if (!loaded.command) {{ __agentOSDebugLog('no-command'); const {{ output }} = require('proc-log'); output.standard(npm.usage); __agentOSFinish(1); return; }} __agentOSDebugLog('before-exec', loaded.command, JSON.stringify(loaded.args)); await npm.exec(loaded.command, loaded.args); __agentOSDebugLog('after-exec', __agentOSResolveExitCode()); __agentOSFinish(); }})().catch((error) => {{ if (__agentOSIsProcessExitError(error)) {{ __agentOSDebugLog('process-exit-error', __agentOSResolveExitCode(error.code)); __agentOSFinish(error.code); return; }} console.error(error && error.stack ? error.stack : String(error)); __agentOSFinish(error && typeof error === 'object' && Number.isFinite(error.exitCode) ? error.exitCode : 1); }});",

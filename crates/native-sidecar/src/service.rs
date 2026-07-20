@@ -2289,7 +2289,7 @@ where
                 .active_processes
                 .get(process_id)
                 .expect("process existence checked above");
-            deferred_kernel_wait_request_for_process(&request, &vm.kernel, process.kernel_pid)?
+            deferred_kernel_wait_request_for_process(&request, &vm.kernel, process)?
                 .filter(|request| request.method == "process.fd_write")
         };
 
@@ -2368,8 +2368,8 @@ where
                         process_id,
                         child_process_id,
                         &chunk,
-                    )?;
-                    Ok(Value::Null.into())
+                    )
+                    .map(|()| Value::Null.into())
                 }
                 "child_process.close_stdin" => {
                     let child_process_id = javascript_sync_rpc_arg_str(
@@ -2377,8 +2377,8 @@ where
                         0,
                         "child_process.close_stdin child id",
                     )?;
-                    self.close_javascript_child_process_stdin(vm_id, process_id, child_process_id)?;
-                    Ok(Value::Null.into())
+                    self.close_javascript_child_process_stdin(vm_id, process_id, child_process_id)
+                        .map(|()| Value::Null.into())
                 }
                 "child_process.kill" => {
                     let child_process_id = javascript_sync_rpc_arg_str(
@@ -2388,13 +2388,8 @@ where
                     )?;
                     let signal =
                         javascript_sync_rpc_arg_str(&request.args, 1, "child_process.kill signal")?;
-                    self.kill_javascript_child_process(
-                        vm_id,
-                        process_id,
-                        child_process_id,
-                        signal,
-                    )?;
-                    Ok(Value::Null.into())
+                    self.kill_javascript_child_process(vm_id, process_id, child_process_id, signal)
+                        .map(|()| Value::Null.into())
                 }
                 "process.exec_fd_image_commit" => {
                     let Some(vm) = self.vms.get(vm_id) else {

@@ -1250,6 +1250,8 @@ pub(crate) struct ActiveProcess {
     /// `udp_sockets`; Python does not own a parallel descriptor or I/O task.
     pub(crate) python_sockets: BTreeMap<u64, PythonHostSocket>,
     pub(crate) next_python_socket_id: u64,
+    pub(crate) hash_sessions: BTreeMap<u64, ActiveHashSession>,
+    pub(crate) next_hash_session_id: u64,
     pub(crate) cipher_sessions: BTreeMap<u64, ActiveCipherSession>,
     pub(crate) next_cipher_session_id: u64,
     pub(crate) diffie_hellman_sessions: BTreeMap<u64, ActiveDiffieHellmanSession>,
@@ -1326,6 +1328,10 @@ pub(crate) struct ActiveMappedHostFd {
 
 pub(crate) struct ActiveCipherSession {
     pub(crate) context: crate::crypto_cipher::StreamCipherSession,
+}
+
+pub(crate) struct ActiveHashSession {
+    pub(crate) context: openssl::hash::Hasher,
 }
 
 pub(crate) struct ActiveSqliteDatabase {
@@ -2203,6 +2209,7 @@ pub(crate) struct JavascriptTlsClientHello {
 #[serde(default, rename_all = "camelCase")]
 pub(crate) struct JavascriptTlsBridgeOptions {
     pub(crate) is_server: bool,
+    pub(crate) host: Option<String>,
     pub(crate) servername: Option<String>,
     pub(crate) reject_unauthorized: Option<bool>,
     pub(crate) request_cert: Option<bool>,

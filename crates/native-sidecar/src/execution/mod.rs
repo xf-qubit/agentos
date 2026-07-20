@@ -110,7 +110,7 @@ use crate::service::{
 };
 use crate::state::{
     async_completion_channel, ActiveCipherSession, ActiveDhSession, ActiveDiffieHellmanSession,
-    ActiveEcdhSession, ActiveExecution, ActiveExecutionEvent, ActiveHttp2Server,
+    ActiveEcdhSession, ActiveExecution, ActiveExecutionEvent, ActiveHashSession, ActiveHttp2Server,
     ActiveHttp2Session, ActiveHttp2Stream, ActiveHttpServer, ActiveMappedHostFd, ActiveProcess,
     ActiveRealIntervalTimer, ActiveSqliteDatabase, ActiveSqliteStatement, ActiveTcpListener,
     ActiveTcpSocket, ActiveTlsState, ActiveUdpSocket, ActiveUnixListener, ActiveUnixSocket,

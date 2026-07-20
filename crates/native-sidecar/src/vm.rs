@@ -2078,7 +2078,12 @@ where
 {
     let max_filesystem_bytes = vm.kernel.resource_limits().max_filesystem_bytes;
     let max_inode_count = vm.kernel.resource_limits().max_inode_count;
-    for mount in mounts {
+    // Mount parents before nested leaves. Configure payload order is not a
+    // filesystem invariant, and mounting a parent after one of its children is
+    // rejected by the kernel mount table.
+    let mut ordered_mounts = mounts.iter().collect::<Vec<_>>();
+    ordered_mounts.sort_by_key(|mount| mount_path_depth(&mount.guest_path));
+    for mount in ordered_mounts {
         let config_value: serde_json::Value =
             serde_json::from_str(&mount.plugin.config).map_err(|error| {
                 SidecarError::InvalidState(format!(
@@ -2136,7 +2141,11 @@ where
     B: NativeSidecarBridge + Send + 'static,
     BridgeError<B>: fmt::Debug + Send + Sync + 'static,
 {
-    for existing in vm.configuration.mounts.clone() {
+    // Nested leaves must be detached before their parents. In particular, npm
+    // workspace packages are explicit child mounts below `/node_modules`.
+    let mut existing_mounts = vm.configuration.mounts.clone();
+    existing_mounts.sort_by_key(|mount| std::cmp::Reverse(mount_path_depth(&mount.guest_path)));
+    for existing in existing_mounts {
         match vm.kernel.unmount_filesystem(&existing.guest_path) {
             Ok(()) => emit_security_audit_event(
                 &context.bridge,
@@ -2172,6 +2181,12 @@ where
     }
 
     Ok(())
+}
+
+fn mount_path_depth(path: &str) -> usize {
+    path.split('/')
+        .filter(|component| !component.is_empty())
+        .count()
 }
 
 /// Build the `/opt/agentos` package projection for `configure_vm`.

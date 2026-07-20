@@ -3382,32 +3382,40 @@ where
             };
 
             let (entrypoint, execution_args) = if is_path_like_specifier(entrypoint_specifier) {
-                let guest_entrypoint = if entrypoint_specifier.starts_with('/') {
+                let requested_guest_entrypoint = if entrypoint_specifier.starts_with('/') {
                     normalize_path(entrypoint_specifier)
                 } else if entrypoint_specifier.starts_with("file:") {
                     normalize_path(entrypoint_specifier.trim_start_matches("file:"))
                 } else {
                     normalize_path(&format!("{guest_cwd}/{entrypoint_specifier}"))
                 };
-                let host_entrypoint = if entrypoint_specifier.starts_with("./")
-                    || entrypoint_specifier.starts_with("../")
-                {
-                    normalize_host_path(&host_cwd.join(entrypoint_specifier))
+                let preserve_main_symlink = process_args
+                    .iter()
+                    .any(|argument| argument == "--preserve-symlinks-main");
+                let (guest_entrypoint, host_entrypoint) = if preserve_main_symlink {
+                    let host_entrypoint = if entrypoint_specifier.starts_with("./")
+                        || entrypoint_specifier.starts_with("../")
+                    {
+                        normalize_host_path(&host_cwd.join(entrypoint_specifier))
+                    } else {
+                        host_runtime_path_for_guest_path_with_env(
+                            vm,
+                            &runtime_env,
+                            &requested_guest_entrypoint,
+                            parent_host_cwd,
+                        )
+                        .unwrap_or_else(|| {
+                            let candidate = PathBuf::from(&requested_guest_entrypoint);
+                            if candidate.is_absolute() {
+                                candidate
+                            } else {
+                                host_cwd.join(&requested_guest_entrypoint)
+                            }
+                        })
+                    };
+                    (requested_guest_entrypoint, host_entrypoint)
                 } else {
-                    host_runtime_path_for_guest_path_with_env(
-                        vm,
-                        &runtime_env,
-                        &guest_entrypoint,
-                        parent_host_cwd,
-                    )
-                    .unwrap_or_else(|| {
-                        let candidate = PathBuf::from(&guest_entrypoint);
-                        if candidate.is_absolute() {
-                            candidate
-                        } else {
-                            host_cwd.join(&guest_entrypoint)
-                        }
-                    })
+                    resolve_javascript_main_entrypoint(vm, &requested_guest_entrypoint)
                 };
                 env.insert(String::from("AGENTOS_GUEST_ENTRYPOINT"), guest_entrypoint);
                 (
@@ -3590,14 +3598,20 @@ where
                 .ok_or_else(|| missing_process_error(vm_id, process_id))?;
             (parent.host_write_dirty_recursive()
                 || !parent.clean_host_writes_are_observable_recursive())
-            .then(|| (parent.host_cwd.clone(), parent.guest_cwd.clone()))
+            .then(|| {
+                (
+                    parent.host_cwd.clone(),
+                    parent.guest_cwd.clone(),
+                    parent.runtime != GuestRuntimeKind::JavaScript,
+                )
+            })
         };
-        if let Some((host_cwd, guest_cwd)) = parent_sync_roots {
+        if let Some((host_cwd, guest_cwd, sync_root_shadow)) = parent_sync_roots {
             let vm = self
                 .vms
                 .get_mut(vm_id)
                 .ok_or_else(|| missing_vm_error(vm_id))?;
-            sync_process_host_roots_to_kernel(vm, &host_cwd, &guest_cwd)?;
+            sync_process_host_roots_to_kernel(vm, &host_cwd, &guest_cwd, sync_root_shadow)?;
         }
         let prepared_host_net_fds = {
             let vm = self
@@ -5053,14 +5067,20 @@ where
                 })?;
             (parent.host_write_dirty_recursive()
                 || !parent.clean_host_writes_are_observable_recursive())
-            .then(|| (parent.host_cwd.clone(), parent.guest_cwd.clone()))
+            .then(|| {
+                (
+                    parent.host_cwd.clone(),
+                    parent.guest_cwd.clone(),
+                    parent.runtime != GuestRuntimeKind::JavaScript,
+                )
+            })
         };
-        if let Some((host_cwd, guest_cwd)) = parent_sync_roots {
+        if let Some((host_cwd, guest_cwd, sync_root_shadow)) = parent_sync_roots {
             let vm = self
                 .vms
                 .get_mut(vm_id)
                 .ok_or_else(|| missing_vm_error(vm_id))?;
-            sync_process_host_roots_to_kernel(vm, &host_cwd, &guest_cwd)?;
+            sync_process_host_roots_to_kernel(vm, &host_cwd, &guest_cwd, sync_root_shadow)?;
         }
         let prepared_host_net_fds = {
             let vm = self
@@ -6031,8 +6051,8 @@ where
                     current_process_path,
                     child_process_id,
                     &chunk,
-                )?;
-                Ok(Value::Null.into())
+                )
+                .map(|()| Value::Null.into())
             }
             "child_process.close_stdin" => {
                 let child_process_id = javascript_sync_rpc_arg_str(
@@ -6045,8 +6065,8 @@ where
                     process_id,
                     current_process_path,
                     child_process_id,
-                )?;
-                Ok(Value::Null.into())
+                )
+                .map(|()| Value::Null.into())
             }
             "child_process.kill" => {
                 let child_process_id =
@@ -6059,8 +6079,8 @@ where
                     current_process_path,
                     child_process_id,
                     signal,
-                )?;
-                Ok(Value::Null.into())
+                )
+                .map(|()| Value::Null.into())
             }
             _ => Err(SidecarError::InvalidState(format!(
                 "unsupported nested child process RPC method {}",
@@ -6807,11 +6827,7 @@ where
                         let Some(child) = parent.child_processes.get(child_process_id) else {
                             return Ok(Value::Null);
                         };
-                        deferred_kernel_wait_request_for_process(
-                            &request,
-                            &vm.kernel,
-                            child.kernel_pid,
-                        )?
+                        deferred_kernel_wait_request_for_process(&request, &vm.kernel, child)?
                     };
                     if let Some(kernel_wait_request) = kernel_wait_request {
                         if self.service_child_kernel_wait_rpc(
@@ -7468,6 +7484,7 @@ where
                 (String::from("signal"), signal_name),
             ]),
         );
+        self.process_event_notify.notify_one();
         Ok(())
     }
 
@@ -7821,6 +7838,7 @@ where
                 (String::from("signal"), signal_name),
             ]),
         );
+        self.process_event_notify.notify_one();
         Ok(())
     }
 }
