@@ -138,7 +138,7 @@
     },
     "/docs/docs/webhooks": {
       "title": "Webhooks",
-      "description": "Trigger agent workflows from external webhooks using Hono and queues."
+      "description": "Trigger agent sessions directly from external webhooks using Hono."
     },
     "/docs/docs/workflows": {
       "title": "Workflow Automation",
