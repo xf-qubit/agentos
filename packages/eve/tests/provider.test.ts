@@ -22,6 +22,25 @@ const createInput = {
 	runtimeContext: { appRoot: "/app" },
 } as const;
 
+function makeRegistry() {
+	return {
+		startAndWait: vi.fn(async () => {}),
+		parseConfig: vi.fn(() => ({
+			endpoint: "http://127.0.0.1:6420",
+			namespace: "default",
+			token: undefined,
+			headers: {},
+			envoy: { poolName: "default" },
+		})),
+	};
+}
+
+let registry = makeRegistry();
+
+function actorBackend(actor = "vm") {
+	return agentOSBackend({ actor, registry });
+}
+
 function deferred<T>() {
 	let resolve!: (value: T) => void;
 	let reject!: (error: unknown) => void;
@@ -76,9 +95,7 @@ async function streamText(stream: ReadableStream<Uint8Array>): Promise<string> {
 describe("agentOSBackend", () => {
 	beforeEach(() => {
 		clientMocks.createClient.mockReset();
-		process.env.RIVET_RUN_ENGINE = "1";
-		delete process.env.RIVET_ENDPOINT;
-		delete process.env.RIVET_TOKEN;
+		registry = makeRegistry();
 	});
 
 	afterEach(() => {
@@ -86,7 +103,7 @@ describe("agentOSBackend", () => {
 	});
 
 	it("fails closed for Eve templates", async () => {
-		const backend = agentOSBackend({ actor: "vm" });
+		const backend = actorBackend();
 		await expect(
 			backend.prewarm({
 				templateKey: "template-1",
@@ -100,18 +117,25 @@ describe("agentOSBackend", () => {
 		expect(clientMocks.createClient).not.toHaveBeenCalled();
 	});
 
-	it("requires production authentication", async () => {
-		process.env.RIVET_RUN_ENGINE = "0";
-		process.env.RIVET_ENDPOINT = "https://api.rivet.dev";
-		const backend = agentOSBackend({ actor: "vm" });
-		const error = await backend.create(createInput).catch((cause) => cause);
-		expect(error).toBeInstanceOf(AgentOSActorConfigurationError);
-		expect(error.message).toContain("RIVET_TOKEN is required");
+	it("waits for the application registry and reuses its resolved config", async () => {
+		const harness = makeHarness();
+		const backend = actorBackend();
+		await backend.create(createInput);
+		expect(registry.startAndWait).toHaveBeenCalledOnce();
+		expect(clientMocks.createClient).toHaveBeenCalledWith({
+			endpoint: "http://127.0.0.1:6420",
+			namespace: "default",
+			poolName: "default",
+			token: undefined,
+			headers: {},
+			disableMetadataLookup: true,
+		});
+		expect(harness.connect).toHaveBeenCalledOnce();
 	});
 
 	it("reuses one handle and connection until idempotent shutdown", async () => {
 		const harness = makeHarness();
-		const backend = agentOSBackend({ actor: "vm" });
+		const backend = actorBackend();
 		const first = await backend.create(createInput);
 		const second = await backend.create(createInput);
 		expect(second).toBe(first);
@@ -140,7 +164,7 @@ describe("agentOSBackend", () => {
 			"$Uint8Array",
 			Buffer.from("hello\nworld\n").toString("base64"),
 		]);
-		const handle = await agentOSBackend({ actor: "vm" }).create(createInput);
+		const handle = await actorBackend().create(createInput);
 
 		expect(handle.session.resolvePath("src/index.ts")).toBe(
 			"/workspace/src/index.ts",
@@ -176,7 +200,7 @@ describe("agentOSBackend", () => {
 		harness.connection.spawn
 			.mockImplementationOnce(() => firstSpawn.promise)
 			.mockImplementationOnce(() => secondSpawn.promise);
-		const handle = await agentOSBackend({ actor: "vm" }).create(createInput);
+		const handle = await actorBackend().create(createInput);
 		const firstPending = handle.session.spawn({ command: "first" });
 		const secondPending = handle.session.spawn({ command: "second" });
 		harness.emit({
@@ -205,7 +229,7 @@ describe("agentOSBackend", () => {
 		harness.connection.spawn
 			.mockImplementationOnce(() => firstSpawn.promise)
 			.mockImplementationOnce(() => secondSpawn.promise);
-		const handle = await agentOSBackend({ actor: "vm" }).create(createInput);
+		const handle = await actorBackend().create(createInput);
 		const firstPending = handle.session.spawn({ command: "first" });
 		const secondPending = handle.session.spawn({ command: "second" });
 		harness.emit({
@@ -236,7 +260,7 @@ describe("agentOSBackend", () => {
 			expect(pid).toBe(9);
 			exited.resolve(137);
 		});
-		const handle = await agentOSBackend({ actor: "vm" }).create(createInput);
+		const handle = await actorBackend().create(createInput);
 		const spawnPromise = handle.session.spawn({ command: "slow-start" });
 		const spawnRejection = expect(spawnPromise).rejects.toThrow("shut down");
 		const shutdown = handle.shutdown();
@@ -250,7 +274,7 @@ describe("agentOSBackend", () => {
 		const harness = makeHarness();
 		const spawned = deferred<{ pid: number }>();
 		harness.connection.spawn.mockReturnValueOnce(spawned.promise);
-		const handle = await agentOSBackend({ actor: "vm" }).create(createInput);
+		const handle = await actorBackend().create(createInput);
 		const controller = new AbortController();
 		const spawnPromise = handle.session.spawn({
 			command: "stalled",
@@ -277,7 +301,7 @@ describe("agentOSBackend", () => {
 			});
 			return { pid: 8 };
 		});
-		const handle = await agentOSBackend({ actor: "vm" }).create(createInput);
+		const handle = await actorBackend().create(createInput);
 		await expect(handle.session.run({ command: "binary" })).resolves.toEqual({
 			exitCode: 0,
 			stdout: "�",

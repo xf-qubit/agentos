@@ -44,9 +44,24 @@ interface AgentOSActorAccessor {
 
 type AgentOSActorClient = Record<string, AgentOSActorAccessor | undefined>;
 
+export interface AgentOSRegistry {
+	startAndWait(): Promise<void>;
+	parseConfig(): {
+		endpoint?: string;
+		namespace: string;
+		token?: string;
+		headers?: Record<string, string>;
+		envoy: { poolName: string };
+	};
+}
+
 export interface AgentOSBackendOptions {
 	/** Registry key of an actor created with `agentOS()`. */
 	actor: string;
+	/** Application registry containing the selected agentOS actor. */
+	registry: AgentOSRegistry;
+	/** Advanced: an existing client for the same registry. */
+	client?: object;
 }
 
 export interface AgentOSCoreCreateInput {
@@ -91,6 +106,13 @@ export function agentOSBackend(options: AgentOSBackendOptions): SandboxBackend {
 	if (!options || typeof options.actor !== "string" || !options.actor.trim()) {
 		throw new TypeError("agentOSBackend requires the registry actor name");
 	}
+	if (
+		!options.registry ||
+		typeof options.registry.startAndWait !== "function" ||
+		typeof options.registry.parseConfig !== "function"
+	) {
+		throw new TypeError("agentOSBackend requires the application registry");
+	}
 	const actor = options.actor.trim();
 	const handles = new Map<string, Promise<SandboxBackendHandle>>();
 
@@ -109,7 +131,7 @@ export function agentOSBackend(options: AgentOSBackendOptions): SandboxBackend {
 			return cachedHandle({
 				backendName: ACTOR_BACKEND_NAME,
 				cacheKey: key.join("\0"),
-				connect: () => connectActor(actor, key),
+				connect: () => connectActor(options, actor, key),
 				handles,
 				metadata: { version: METADATA_VERSION, actor, key },
 				networkPolicyOwner: `actor ${JSON.stringify(actor)}; configure permissions on agentOS({...})`,
@@ -159,40 +181,44 @@ function actorKey(sessionKey: string): string[] {
 	return ["eve", "session", stableId(sessionKey)];
 }
 
-async function actorClient(): Promise<AgentOSActorClient> {
-	const local = process.env.RIVET_RUN_ENGINE === "1";
-	const host = process.env.RIVET_RUN_ENGINE_HOST ?? "127.0.0.1";
-	const port = process.env.RIVET_RUN_ENGINE_PORT ?? "6420";
-	const endpoint =
-		process.env.RIVET_ENDPOINT ??
-		(local ? `http://${host}:${port}` : undefined);
-	if (!endpoint) {
-		throw new Error(
-			"RIVET_ENDPOINT is required outside local embedded-engine mode",
-		);
+const registryClients = new WeakMap<object, Promise<AgentOSActorClient>>();
+
+async function actorClient(
+	options: AgentOSBackendOptions,
+): Promise<AgentOSActorClient> {
+	await options.registry.startAndWait();
+	if (options.client) return options.client as AgentOSActorClient;
+
+	const registryKey = options.registry as object;
+	let pending = registryClients.get(registryKey);
+	if (!pending) {
+		pending = (async () => {
+			const config = options.registry.parseConfig();
+			const { createClient } = await import("@rivet-dev/agentos/client");
+			return createClient<never>({
+				endpoint: config.endpoint,
+				namespace: config.namespace,
+				poolName: config.envoy.poolName,
+				token: config.token,
+				headers: config.headers,
+				disableMetadataLookup: true,
+			} as never) as unknown as AgentOSActorClient;
+		})().catch((error) => {
+			registryClients.delete(registryKey);
+			throw error;
+		});
+		registryClients.set(registryKey, pending);
 	}
-	const token = process.env.RIVET_TOKEN ?? (local ? "dev" : undefined);
-	if (!token) {
-		throw new Error(
-			"RIVET_TOKEN is required outside local embedded-engine mode",
-		);
-	}
-	const { createClient } = await import("@rivet-dev/agentos/client");
-	return createClient<never>({
-		endpoint,
-		namespace: process.env.RIVET_NAMESPACE ?? (local ? "default" : undefined),
-		poolName: process.env.RIVET_POOL_NAME ?? (local ? "default" : undefined),
-		token,
-		disableMetadataLookup: true,
-	} as never) as unknown as AgentOSActorClient;
+	return pending;
 }
 
 async function connectActor(
+	options: AgentOSBackendOptions,
 	actor: string,
 	key: string[],
 ): Promise<AgentOSActorConnection> {
 	try {
-		const accessor = (await actorClient())[actor];
+		const accessor = (await actorClient(options))[actor];
 		if (!accessor || typeof accessor.getOrCreate !== "function") {
 			throw new Error(`registry has no actor named ${JSON.stringify(actor)}`);
 		}
@@ -275,10 +301,10 @@ async function cachedHandle(
 		const connection = await input.connect();
 		let actorSession: ReturnType<typeof createActorSession>;
 		try {
-				actorSession = createActorSession(
-					connection,
-					input.sessionKey,
-					input.networkPolicyOwner,
+			actorSession = createActorSession(
+				connection,
+				input.sessionKey,
+				input.networkPolicyOwner,
 			);
 		} catch (error) {
 			try {

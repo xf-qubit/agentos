@@ -8,7 +8,7 @@ Requires Node.js 24 or newer.
 ## Rivet actor
 
 ```sh
-pnpm add eve @rivet-dev/agentos @rivet-dev/agentos-eve
+pnpm add eve @rivet-dev/agentos @rivet-dev/agentos-eve @rivet-dev/vercel-world
 ```
 
 Register the VM as a normal agentOS actor. Its configuration owns software,
@@ -17,65 +17,26 @@ permissions, limits, sandbox mounting, and persistence:
 ```ts
 // registry.ts
 import { agentOS, setup } from "@rivet-dev/agentos";
+import { vercelWorldActors } from "@rivet-dev/vercel-world/registry";
 
 const vm = agentOS({
 	// Configure software, permissions, limits, and mounts here.
 });
 
 export const registry = setup({
-	use: { vm },
-});
-```
-
-Start that registry from the same process as Eve:
-
-```ts
-// agent/instrumentation.ts
-import { defineInstrumentation } from "eve/instrumentation";
-import { registry } from "../registry";
-
-registry.start();
-
-export default defineInstrumentation({});
-```
-
-### Optional: Rivet World
-
-Install `@rivet-dev/vercel-world` to run Eve workflows on Rivet World. Add its
-actors to the same registry, then use the app-owned World bootstrap described
-in the [integration guide](https://agentos-sdk.dev/docs/frameworks/vercel-eve).
-
-```ts
-import { vercelWorldActors } from "@rivet-dev/vercel-world/registry";
-
-export const registry = setup({
 	use: { ...vercelWorldActors, vm },
 });
 ```
 
-Give Vercel World that combined registry. In `package.json`, map `#world` to
-`./world.ts`, then set `experimental.workflow.world` to `#world` in the Eve
-agent config:
-
-```json
-{
-	"imports": {
-		"#world": "./world.ts"
-	}
-}
-```
+Give Vercel World that combined registry, then point Eve at the app-relative
+World module:
 
 ```ts
 // world.ts
 import { createWorld as createRivetWorld } from "@rivet-dev/vercel-world";
-import { registry } from "./registry.ts";
+import { registry } from "./registry";
 
-export function createWorld() {
-	// World calls registry.startAndWait() before every actor request. Repeated
-	// calls share one readiness promise. Eve instrumentation is not a safe
-	// bootstrap because Eve may serve requests before instrumentation completes.
-	return createRivetWorld({ registry });
-}
+export const createWorld = () => createRivetWorld({ registry });
 ```
 
 ```ts
@@ -84,23 +45,23 @@ import { defineAgent } from "eve";
 
 export default defineAgent({
 	model: "openai/gpt-5.4-mini",
-	experimental: { workflow: { world: "#world" } },
+	experimental: { workflow: { world: "./world.ts" } },
 });
 ```
 
 The first World operation lazily starts the registry and waits for the Rivet
-envoy. Do not move this into Eve instrumentation: Eve can serve requests before
-instrumentation completes.
+envoy.
 
 Select the actor by its registry key:
 
 ```ts
-// agent/sandbox/sandbox.ts
+// agent/sandbox.ts
 import { agentOSBackend } from "@rivet-dev/agentos-eve";
 import { defineSandbox } from "eve/sandbox";
+import { registry } from "../registry";
 
 export default defineSandbox({
-	backend: agentOSBackend({ actor: "vm" }),
+	backend: agentOSBackend({ actor: "vm", registry }),
 });
 ```
 

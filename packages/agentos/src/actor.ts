@@ -21,6 +21,7 @@ import {
 	UserError,
 } from "rivetkit";
 import { type DatabaseProvider, db, type RawAccess } from "rivetkit/db";
+import { migrations } from "rivetkit/unstable/migrations";
 import type {
 	AgentOsEvents,
 	ProcessExitPayload,
@@ -291,46 +292,13 @@ export async function migrateAgentOsActorTables(
 	database: RawAccess,
 ): Promise<void> {
 	validateAgentOsActorMigrationLadder(ACTOR_SQLITE_MIGRATIONS);
-	await database.execute(`
-		CREATE TABLE IF NOT EXISTS agentos_actor_schema_version (
-			singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-			schema_version INTEGER NOT NULL CHECK (schema_version BETWEEN 0 AND ${MAX_SQLITE_SAFE_INTEGER})
-		) STRICT;
-	`);
-	const rows = await database.execute<{ schema_version: unknown }>(
-		"SELECT schema_version FROM agentos_actor_schema_version WHERE singleton = 1",
-	);
-	if (rows.length > 1) {
-		throw new Error(
-			`invalid AgentOS actor SQLite schema version table: expected at most one row, received ${rows.length}`,
-		);
-	}
-	const rawCurrent = rows[0]?.schema_version;
-	const current = rows.length === 0 ? 0 : rawCurrent;
-	if (
-		typeof current !== "number" ||
-		!Number.isSafeInteger(current) ||
-		current < 0
-	) {
-		throw new Error(
-			`invalid AgentOS actor SQLite schema version ${String(rawCurrent)}`,
-		);
-	}
-	if (current > ACTOR_SQLITE_MIGRATIONS.length) {
-		throw new Error(
-			`AgentOS actor SQLite schema version ${current} is newer than supported version ${ACTOR_SQLITE_MIGRATIONS.length}`,
-		);
-	}
-	for (const migration of ACTOR_SQLITE_MIGRATIONS.slice(current)) {
-		await database.execute(migration.sql);
-		await database.execute(
-			`INSERT INTO agentos_actor_schema_version (singleton, schema_version)
-			 VALUES (1, ?)
-			 ON CONFLICT(singleton) DO UPDATE SET schema_version = excluded.schema_version`,
-			migration.version,
-		);
-	}
+	await runAgentOsActorMigrations(database);
 }
+
+const runAgentOsActorMigrations = migrations({
+	tableName: "agentos_actor_schema_version",
+	migrations: ACTOR_SQLITE_MIGRATIONS,
+});
 
 async function assertActorCollectionCapacity(
 	c: AnyContext,

@@ -288,7 +288,7 @@ describe("agentOS actor", () => {
 		);
 		await expect(
 			migrateAgentOsActorTables({ execute } as never),
-		).rejects.toThrow("invalid AgentOS actor SQLite schema version");
+		).rejects.toThrow(/invalid (?:schema version|migration table)/);
 	});
 
 	test("rejects a future actor schema version without changing it", async () => {
@@ -303,7 +303,7 @@ describe("agentOS actor", () => {
 			.run();
 
 		await expect(provider.onMigrate(access)).rejects.toThrow(
-			"newer than supported version 1",
+			'migration version 2 in "agentos_actor_schema_version" is newer than supported version 1',
 		);
 		expect(
 			sqlite

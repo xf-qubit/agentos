@@ -16,10 +16,10 @@ pnpm install
 AI_GATEWAY_API_KEY=... pnpm dev
 ```
 
-`eve dev` starts the Eve server. Eve loads `agent/instrumentation.ts`, which
-starts the agentOS registry in the same process, so there is no second
-development server. Reconnect to the same Eve session to verify that the
-actor-owned workspace survives sandbox sleep and resume.
+`eve dev` starts the Eve server. The first World or sandbox operation lazily
+starts the shared registry in the same process and waits for it to become ready,
+so there is no second development server. Reconnect to the same Eve session to
+verify that the actor-owned workspace survives sandbox sleep and resume.
 
 ## Configuration
 

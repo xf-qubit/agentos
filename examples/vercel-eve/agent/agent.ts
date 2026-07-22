@@ -9,8 +9,11 @@ export default defineAgent({
 			"@rivet-dev/agentos-eve",
 			"@rivet-dev/agentos-runtime-core",
 			"@rivet-dev/agentos-sidecar",
+			"@rivet-dev/vercel-world",
 			"@rivetkit/engine-cli",
-			"@rivetkit/engine-cli-linux-x64-musl",
 		],
+	},
+	experimental: {
+		workflow: { world: "./world.ts" },
 	},
 });
