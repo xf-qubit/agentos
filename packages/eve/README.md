@@ -8,7 +8,7 @@ Requires Node.js 24 or newer.
 ## Rivet actor
 
 ```sh
-pnpm add eve @rivet-dev/agentos @rivet-dev/agentos-eve @rivet-dev/vercel-world
+pnpm add eve @rivet-dev/agentos @rivet-dev/agentos-eve
 ```
 
 Register the VM as a normal agentOS actor. Its configuration owns software,
@@ -17,40 +17,15 @@ permissions, limits, sandbox mounting, and persistence:
 ```ts
 // registry.ts
 import { agentOS, setup } from "@rivet-dev/agentos";
-import { vercelWorldActors } from "@rivet-dev/vercel-world/registry";
 
 const vm = agentOS({
 	// Configure software, permissions, limits, and mounts here.
 });
 
 export const registry = setup({
-	use: { ...vercelWorldActors, vm },
+	use: { vm },
 });
 ```
-
-Give Vercel World that combined registry, then point Eve at the app-relative
-World module:
-
-```ts
-// world.ts
-import { createWorld as createRivetWorld } from "@rivet-dev/vercel-world";
-import { registry } from "./registry";
-
-export const createWorld = () => createRivetWorld({ registry });
-```
-
-```ts
-// agent/agent.ts
-import { defineAgent } from "eve";
-
-export default defineAgent({
-	model: "openai/gpt-5.4-mini",
-	experimental: { workflow: { world: "./world.ts" } },
-});
-```
-
-The first World operation lazily starts the registry and waits for the Rivet
-envoy.
 
 Select the actor by its registry key:
 

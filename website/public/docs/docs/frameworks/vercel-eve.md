@@ -14,12 +14,11 @@ cd my-agent
 ```
 
 ```sh
-npm add @rivet-dev/agentos @rivet-dev/agentos-eve @rivet-dev/vercel-world
+npm add @rivet-dev/agentos @rivet-dev/agentos-eve
 ```
 
 - `@rivet-dev/agentos`: Provides the durable VM actor.
 - `@rivet-dev/agentos-eve`: Connects Eve's sandbox API to agentOS.
-- `@rivet-dev/vercel-world`: Runs Eve workflows on [Rivet World](https://workflow-sdk.dev/worlds).
 
 Update `agent/agent.ts`:
 
@@ -34,12 +33,8 @@ export default defineAgent({
 			"@rivet-dev/agentos-eve",
 			"@rivet-dev/agentos-runtime-core",
 			"@rivet-dev/agentos-sidecar",
-			"@rivet-dev/vercel-world",
 			"@rivetkit/engine-cli",
 		],
-	},
-	experimental: {
-		workflow: { world: "./world.ts" },
 	},
 });
 ```
@@ -48,31 +43,15 @@ Create `registry.ts`:
 
 ```ts title="registry.ts"
 import { agentOS, setup } from "@rivet-dev/agentos";
-import { vercelWorldActors } from "@rivet-dev/vercel-world/registry";
 
 const vm = agentOS({
 	// Configuration will go here.
 });
 
 export const registry = setup({
-	use: {
-		...vercelWorldActors,
-		vm,
-	},
+	use: { vm },
 });
 ```
-
-Create `world.ts`:
-
-```ts title="world.ts"
-import { createWorld as createRivetWorld } from "@rivet-dev/vercel-world";
-import { registry } from "./registry";
-
-export const createWorld = () => createRivetWorld({ registry });
-```
-
-The first World operation starts this registry and waits for the Rivet envoy to
-be ready.
 
 Create `agent/sandbox.ts`:
 
@@ -109,7 +88,7 @@ See the `agentOS()` [configuration reference](/docs/core#configuration-reference
 | Option | Required | Description |
 | --- | --- | --- |
 | `actor` | Yes | Actor registered with `setup()`, such as `vm`. |
-| `registry` | Yes | The application registry containing that actor. It is started lazily and shared with Rivet World. |
+| `registry` | Yes | The application registry containing that actor. It is started lazily and shared by Eve sessions. |
 | `client` | No | An existing client configured for the same registry. |
 
 ## Advanced
