@@ -3,6 +3,7 @@ packages:
   - packages/agentos
   - packages/agentos-toolchain
   - packages/eve
+  - packages/flue
   - packages/browser
   - packages/build-tools
   - packages/core
