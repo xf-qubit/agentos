@@ -18,8 +18,7 @@ npm add "@flue/runtime@npm:@rivet-dev/labs-flue-runtime@1.0.0-beta.9-rivet.2"
 npm add --save-dev "@flue/cli@npm:@rivet-dev/labs-flue-cli@1.0.0-beta.9-rivet.2"
 
 # Install the Rivet packages
-npm add \
-  @rivet-dev/flue @rivet-dev/agentos @rivet-dev/agentos-flue rivetkit
+npm add @rivet-dev/flue @rivet-dev/agentos @rivet-dev/agentos-flue rivetkit
 
 # Initialize the project
 npx flue init --target node
@@ -29,7 +28,7 @@ npx flue init --target node
 - `@rivet-dev/flue`: Runs Flue agents and workflows as Rivet Actors.
 - `@rivet-dev/agentos` and `@rivet-dev/agentos-flue`: Provide the agentOS VM and connect Flue's sandbox API to it.
 
-*This uses [Rivet's Flue fork](https://github.com/rivet-dev/flue). We're working to merge its extension APIs [upstream](https://github.com/withastro/flue/discussions/516) so Flue can support actor-model runtimes without a Rivet fork.*
+*This uses [Rivet's Flue fork](https://github.com/rivet-dev/flue). We're working to merge its extension APIs upstream so Flue can support actor-model runtimes without a Rivet fork.*
 
 Create `actors.ts`:
 
