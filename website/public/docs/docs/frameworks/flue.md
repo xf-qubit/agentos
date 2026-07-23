@@ -27,7 +27,7 @@ npx flue init --target node
 - `@rivet-dev/flue`: Runs Flue agents and workflows as Rivet Actors.
 - `@rivet-dev/agentos` and `@rivet-dev/agentos-flue`: Provide the agentOS VM and connect Flue's sandbox API to it.
 
-*This uses [Rivet's Flue fork](https://github.com/rivet-dev/flue). We're working to merge its extension APIs [upstream](https://github.com/withastro/flue/discussions/516) so Flue can support actor-model runtimes without a Rivet dependency.*
+*This uses [Rivet's Flue fork](https://github.com/rivet-dev/flue). We're working to merge its extension APIs [upstream](https://github.com/withastro/flue/discussions/516) so Flue can support actor-model runtimes without a Rivet fork.*
 
 Create `actors.ts`:
 
