@@ -7,15 +7,15 @@ settings:
 catalogs:
   rivetkit:
     '@rivetkit/react':
-      specifier: 2.3.7
-      version: 2.3.7
+      specifier: 2.3.9
+      version: 2.3.9
     rivetkit:
-      specifier: 2.3.7
-      version: 2.3.7
+      specifier: 2.3.9
+      version: 2.3.9
 
 overrides:
   '@rivet-dev/agentos-core': workspace:*
-  '@rivetkit/rivetkit-wasm': 2.3.7
+  '@rivetkit/rivetkit-wasm': 2.3.9
   '@mariozechner/pi-tui': 0.60.0
   '@mariozechner/pi-agent-core': 0.60.0
 
@@ -115,7 +115,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -143,7 +143,7 @@ importers:
         version: link:../../packages/agentos
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
     devDependencies:
       '@types/node':
         specifier: ^22.10.2
@@ -183,7 +183,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -232,7 +232,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -281,7 +281,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -324,7 +324,7 @@ importers:
         version: link:../../packages/agentos
       '@rivetkit/react':
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       '@xterm/addon-fit':
         specifier: ^0.10.0
         version: 0.10.0(@xterm/xterm@5.5.0)
@@ -339,7 +339,7 @@ importers:
         version: 19.2.7(react@19.2.7)
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
     devDependencies:
       '@types/react':
         specifier: ^19.0.0
@@ -379,7 +379,7 @@ importers:
         version: link:../../packages/agentos
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
     devDependencies:
       '@types/node':
         specifier: ^22.10.2
@@ -422,7 +422,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -471,7 +471,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -520,7 +520,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -569,7 +569,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -618,7 +618,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -667,7 +667,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -716,7 +716,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -765,7 +765,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -787,10 +787,10 @@ importers:
     dependencies:
       '@flue/cli':
         specifier: npm:@rivet-dev/labs-flue-cli@1.0.0-beta.9-rivet.2
-        version: '@rivet-dev/labs-flue-cli@1.0.0-beta.9-rivet.2(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@types/node@24.13.2)(bufferutil@4.1.0)(esbuild@0.28.1)(hono@4.12.9)(jiti@2.7.0)(tsx@4.21.0)(typebox@1.3.6)(typescript@5.9.3)(wrangler@4.113.0(bufferutil@4.1.0))(ws@8.21.0(bufferutil@4.1.0))(yaml@2.9.0)(zod-to-json-schema@3.25.2(zod@4.3.6))(zod@4.3.6)'
+        version: '@rivet-dev/labs-flue-cli@1.0.0-beta.9-rivet.2(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@types/node@24.13.2)(bufferutil@4.1.0)(esbuild@0.28.1)(hono@4.12.9)(jiti@2.7.0)(tsx@4.21.0)(typebox@1.3.6)(typescript@5.9.3)(wrangler@4.113.0(bufferutil@4.1.0))(ws@8.21.0(bufferutil@4.1.0))(yaml@2.9.0)(zod-to-json-schema@3.25.2(zod@3.25.76))(zod@3.25.76)'
       '@flue/runtime':
         specifier: npm:@rivet-dev/labs-flue-runtime@1.0.0-beta.9-rivet.2
-        version: '@rivet-dev/labs-flue-runtime@1.0.0-beta.9-rivet.2(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(bufferutil@4.1.0)(typebox@1.3.6)(typescript@5.9.3)(ws@8.21.0(bufferutil@4.1.0))(zod-to-json-schema@3.25.2(zod@4.3.6))(zod@4.3.6)'
+        version: '@rivet-dev/labs-flue-runtime@1.0.0-beta.9-rivet.2(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(bufferutil@4.1.0)(typebox@1.3.6)(typescript@5.9.3)(ws@8.21.0(bufferutil@4.1.0))(zod-to-json-schema@3.25.2(zod@3.25.76))(zod@3.25.76)'
       '@rivet-dev/agentos':
         specifier: workspace:*
         version: link:../../packages/agentos
@@ -798,11 +798,11 @@ importers:
         specifier: workspace:*
         version: link:../../packages/flue
       '@rivet-dev/flue':
-        specifier: 2.3.7
-        version: 2.3.7(@opentelemetry/api@1.9.0)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@types/node@24.13.2)(better-sqlite3@12.8.0)(bufferutil@4.1.0)(esbuild@0.28.1)(hono@4.12.9)(jiti@2.7.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(tsx@4.21.0)(typebox@1.3.6)(typescript@5.9.3)(wrangler@4.113.0(bufferutil@4.1.0))(ws@8.21.0(bufferutil@4.1.0))(yaml@2.9.0)(zod-to-json-schema@3.25.2(zod@4.3.6))(zod@4.3.6)
+        specifier: 2.3.9
+        version: 2.3.9(@opentelemetry/api@1.9.0)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@types/node@24.13.2)(better-sqlite3@12.8.0)(bufferutil@4.1.0)(esbuild@0.28.1)(hono@4.12.9)(jiti@2.7.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(tsx@4.21.0)(typebox@1.3.6)(typescript@5.9.3)(wrangler@4.113.0(bufferutil@4.1.0))(ws@8.21.0(bufferutil@4.1.0))(yaml@2.9.0)(zod-to-json-schema@3.25.2(zod@3.25.76))(zod@3.25.76)
       rivetkit:
-        specifier: 2.3.7
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        specifier: 2.3.9
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
@@ -842,7 +842,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -891,7 +891,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -940,7 +940,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -989,7 +989,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -1038,7 +1038,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -1087,7 +1087,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -1136,7 +1136,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -1185,7 +1185,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -1234,7 +1234,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -1283,7 +1283,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -1338,7 +1338,7 @@ importers:
         version: 18.3.1(react@18.3.1)
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -1390,7 +1390,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -1439,7 +1439,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -1507,7 +1507,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -1556,7 +1556,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -1605,7 +1605,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -1654,7 +1654,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -1703,7 +1703,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -1752,7 +1752,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -1801,7 +1801,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -1850,7 +1850,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -1899,7 +1899,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -1948,7 +1948,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -1997,7 +1997,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -2046,7 +2046,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -2095,7 +2095,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -2153,7 +2153,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -2183,8 +2183,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/eve
       '@rivet-dev/vercel-world':
-        specifier: 2.3.7
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        specifier: 2.3.9
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       '@vercel/connect':
         specifier: 0.4.0
         version: 0.4.0(ai@7.0.26(zod@4.3.6))(eve@0.27.0(@opentelemetry/api@1.9.0)(ai@7.0.26(zod@4.3.6))(aws4fetch@1.0.20)(better-sqlite3@12.8.0)(chokidar@5.0.0)(dotenv@16.6.1)(drizzle-orm@0.44.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(sql.js@1.14.1))(jiti@2.7.0)(just-bash@3.1.0)(lru-cache@11.2.7)(miniflare@4.20260721.0(bufferutil@4.1.0))(vite@8.1.5(@types/node@24.13.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.0))(wrangler@4.113.0(bufferutil@4.1.0)))
@@ -2239,7 +2239,7 @@ importers:
         version: 4.12.9
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -2288,7 +2288,7 @@ importers:
         version: 7.2.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       sandbox-agent:
         specifier: ^0.4.2
         version: 0.4.2(@vercel/sandbox@2.8.0)(dockerode@4.0.10)(get-port@7.2.0)(zod@4.3.6)
@@ -2334,7 +2334,7 @@ importers:
         version: 9.14.0
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       tsx:
         specifier: ^4.19.0
         version: 4.21.0
@@ -2368,10 +2368,10 @@ importers:
         version: link:../core
       '@rivetkit/react':
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       zod:
         specifier: ^4.1.11
         version: 4.3.6
@@ -2739,7 +2739,7 @@ importers:
     devDependencies:
       '@flue/runtime':
         specifier: npm:@rivet-dev/labs-flue-runtime@1.0.0-beta.9-rivet.2
-        version: '@rivet-dev/labs-flue-runtime@1.0.0-beta.9-rivet.2(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(bufferutil@4.1.0)(typebox@1.3.6)(typescript@5.9.3)(ws@8.21.0(bufferutil@4.1.0))(zod-to-json-schema@3.25.2(zod@3.25.76))(zod@3.25.76)'
+        version: '@rivet-dev/labs-flue-runtime@1.0.0-beta.9-rivet.2(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(bufferutil@4.1.0)(typebox@1.3.6)(typescript@5.9.3)(ws@8.21.0(bufferutil@4.1.0))(zod-to-json-schema@3.25.2(zod@4.3.6))(zod@4.3.6)'
       '@rivet-dev/agentos':
         specifier: workspace:*
         version: link:../agentos
@@ -3045,7 +3045,7 @@ importers:
         version: 14.0.3
       rivetkit:
         specifier: catalog:rivetkit
-        version: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+        version: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
     devDependencies:
       '@types/node':
         specifier: ^22.19.3
@@ -4075,7 +4075,7 @@ importers:
         version: file:website/vendor/theme/vendor/components(@babel/core@7.29.7)(@babel/runtime@7.29.2)(@babel/template@7.29.7)(@codemirror/language@6.12.4)(@codemirror/search@6.7.1)(@codemirror/theme-one-dark@6.1.3)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(codemirror@6.0.2)(lodash@4.18.1)(posthog-js@1.406.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(tailwindcss@3.4.19(tsx@4.21.0)(yaml@2.9.0))
       '@rivet-gg/icons':
         specifier: workspace:*
-        version: file:website/vendor/theme/vendor/icons(@fortawesome/fontawesome-svg-core@7.3.1)(@fortawesome/free-brands-svg-icons@7.3.1)(@fortawesome/free-solid-svg-icons@7.3.1)(@fortawesome/react-fontawesome@3.5.0(@fortawesome/fontawesome-svg-core@7.3.1)(react@19.2.7))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+        version: link:vendor/theme/vendor/icons
       astro:
         specifier: ^5.18.2
         version: 5.18.2(@types/node@24.13.2)(aws4fetch@1.0.20)(db0@0.3.4(better-sqlite3@12.8.0)(drizzle-orm@0.44.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(sql.js@1.14.1)))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.60.1)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0)
@@ -6127,9 +6127,6 @@ packages:
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
 
-  '@flue/sdk@1.0.0-beta.9':
-    resolution: {integrity: sha512-EkGWF1Yw6baM4ekmp+3xFkc+LmDKcIAA0KQSZSpaSqQRYyixXB+IwEbhePS83HCgrR0/jup9l8rgld4Q2IGNOw==}
-
   '@fortawesome/fontawesome-common-types@6.7.2':
     resolution: {integrity: sha512-Zs+YeHUC5fkt7Mg1l6XTniei3k4bwG/yo3iFUtZWd/pMx9g3fdvkSK9E0FOC+++phXOka78uJcYb8JaFkW52Xg==}
     engines: {node: '>=6'}
@@ -7630,23 +7627,14 @@ packages:
       pyodide:
         optional: true
 
-  '@rivet-dev/flue@2.3.7':
-    resolution: {integrity: sha512-oN97f08sddVzIYr+rVWvtNqwVa1nFzKl3+rZG02lETvLapn0m4yCWqEuaRNp3V8VPW8kEpvuzdgo6ldrcpgXgw==}
+  '@rivet-dev/flue@2.3.9':
+    resolution: {integrity: sha512-z+dmXtxidszO+otaqn35TPGloV0JGRTfGpq5QH+rGvHHUBz78Gw7GyIHm/p3AFvQJlyBVtl5OfPAMFgUcabfAg==}
     engines: {node: '>=22.19.0'}
-
-  '@rivet-dev/labs-flue-cli@1.0.0-beta.9-rivet.1':
-    resolution: {integrity: sha512-8FgAXSKENE09WiLlls2MauMJuCNczxvQVMX2xGidQNFNKA9zuGBwN5S352uiaYk5o8qHhZV23+otSeak/cWspw==}
-    engines: {node: '>=22.19.0'}
-    hasBin: true
 
   '@rivet-dev/labs-flue-cli@1.0.0-beta.9-rivet.2':
     resolution: {integrity: sha512-5nQEh0Pj4koF/lOyNQ/aTZGLPmXAtiHJmFuevfg6oP9J8G65YPlx64SJAMdc37frUSNlIoYx/yNKDXcBE46RtQ==}
     engines: {node: '>=22.19.0'}
     hasBin: true
-
-  '@rivet-dev/labs-flue-runtime@1.0.0-beta.9-rivet.1':
-    resolution: {integrity: sha512-MCwRS12jbgzIEjVYwHXpHjDrkBU6tjSVCIsepZY8SyBM+1VeZpKAfzLi9zOdMqowHftkOP1bx2Bn8RBr/tSeLQ==}
-    engines: {node: '>=22.19.0'}
 
   '@rivet-dev/labs-flue-runtime@1.0.0-beta.9-rivet.2':
     resolution: {integrity: sha512-sIbIrYXGnCZ3S80NU+9/4qYEGzhT5RBCjHKkrBckiYlIrEW0Y0mohR+hcqt1bSDuk8Jd6EUGF0FCOVSA0CVTxA==}
@@ -7655,8 +7643,8 @@ packages:
   '@rivet-dev/labs-flue-sdk@1.0.0-beta.9-rivet.2':
     resolution: {integrity: sha512-Hts14CWUNUSB9FMTg21maatBEoqbpX80UDmTuMp8N1HNdkEow1pBhIg122ZnfaUyNdzx6vzrQaNhKCfDb7YkeA==}
 
-  '@rivet-dev/vercel-world@2.3.7':
-    resolution: {integrity: sha512-abtMmQUwNGgjXYcbS3WWZV6ahUAvV/bo4wENrwCBs7fi33bV8oR0+LS22A2tu9T7Syu0f+LyLNgjPMO96HLiiw==}
+  '@rivet-dev/vercel-world@2.3.9':
+    resolution: {integrity: sha512-Yy7zGFx1M11styEFVHOo+jEJwRPbqIxcpDkBFoDHSZPhTbdw82pkBo+2p9z+TbX6wdw3CrlHoayLUsVVXPm01Q==}
     engines: {node: '>=22.0.0'}
 
   '@rivet-gg/components@file:website/vendor/theme/vendor/components':
@@ -7685,114 +7673,114 @@ packages:
     resolution: {integrity: sha512-3qndQUQXLdwafMEqfhz24hUtDPcsf1Bu3q52Kb8MqeH8JUh3h6R4HYW3ZJXiQsLcyYyFM68PuIwlLRlg1xDEpg==}
     engines: {node: ^14.18.0 || >=16.0.0}
 
-  '@rivetkit/engine-cli-darwin-arm64@2.3.7':
-    resolution: {integrity: sha512-F3yGSDIaW94BZzuAm3erQRT/Ki55wHJ/b6tOaE7d9tRmTAZw/XqHmjNdUYjOvFUQKLb+SSsOittM4dINrAANQQ==}
+  '@rivetkit/engine-cli-darwin-arm64@2.3.9':
+    resolution: {integrity: sha512-4mXfCo48055pnNViS+2WjC8p57eLLzLw1ZNgL0b7AoaPpxJ4YKXJ9F8TezSHtTc5ScXtPdfZb5jH4n/e6ePSMA==}
     engines: {node: '>= 20.0.0'}
     cpu: [arm64]
     os: [darwin]
 
-  '@rivetkit/engine-cli-darwin-x64@2.3.7':
-    resolution: {integrity: sha512-P8BbQsamIvv8U/cEoJUFr+uAzwjjl9cG+ZZxjDX9OJxbuD11ESpHvDLgge54ijynO3IjoP8cIzjIXat6mr2Gkw==}
+  '@rivetkit/engine-cli-darwin-x64@2.3.9':
+    resolution: {integrity: sha512-BiNPd5KWKFp9H3xWZqeILJ9bmz7c04fYAAwXWtqmAWfGMBCd11QAGsJFwDnoHsMQhEGpDzbYg5L0KbKUD4HIMA==}
     engines: {node: '>= 20.0.0'}
     cpu: [x64]
     os: [darwin]
 
-  '@rivetkit/engine-cli-linux-arm64-musl@2.3.7':
-    resolution: {integrity: sha512-G3s76BHfIs6R9rm6JYI13sOjPLy08+C8WvVoFwSdMqsibEaqlfo36wVkp/x1g0sEZUek/dBxVrKqMMR7c4/gug==}
+  '@rivetkit/engine-cli-linux-arm64-musl@2.3.9':
+    resolution: {integrity: sha512-xbtUVXPK9aMcJgaA9XcLnZ52J9a9YXUWAP7pk9uHY7rRYODOwC8rRReiyeD++/+7+YsciwcIDcHb4daLHrN4tg==}
     engines: {node: '>= 20.0.0'}
     cpu: [arm64]
     os: [linux]
 
-  '@rivetkit/engine-cli-linux-x64-musl@2.3.7':
-    resolution: {integrity: sha512-LWhrUVzULcsZ4ufCLsx23YfrdMW2INd9g0ANBac9+PzGwL8qYfVIXnDpR3587lapu68EbSEPZcconf1tBlvJxQ==}
+  '@rivetkit/engine-cli-linux-x64-musl@2.3.9':
+    resolution: {integrity: sha512-0OqFgoV4nvRJKtgXEELpwTLKuFJu6DaffG+l9xkDUdcTsf/tAgk5oNU1CLgGK0JsuT77JFucAqVd93pOEWSKhg==}
     engines: {node: '>= 20.0.0'}
     cpu: [x64]
     os: [linux]
 
-  '@rivetkit/engine-cli-win32-x64@2.3.7':
-    resolution: {integrity: sha512-jyA5PlHivHXyyq2ehnuXwxd5TUSbB4emomnph9EovsJo7qIdmSNaaCO13NYBT483fd0uXiNI0MK/lkJa9ePY5A==}
+  '@rivetkit/engine-cli-win32-x64@2.3.9':
+    resolution: {integrity: sha512-Pqr6YAM49vbDUhg6olE07wvIk0AhiEhoHFDoZWxfGLnnNAbZNKEa72j7rOZa0mXMe1JPCTRfG7zG85bIH6y4tQ==}
     engines: {node: '>= 20.0.0'}
     cpu: [x64]
     os: [win32]
 
-  '@rivetkit/engine-cli@2.3.7':
-    resolution: {integrity: sha512-CezLwJ0B7dWDbA7qM6Aq04mwnrJAdrDActRrrcb4NBa20h7wO9KPAYBwyJz/dRnKm9EUUNcFZ6hrSDpp6T3+Rg==}
+  '@rivetkit/engine-cli@2.3.9':
+    resolution: {integrity: sha512-6sFgD0h5Z6aTioerwCNw3WF0jRysEhJhOlQHHVdnL32KzXfZoAcJLvS3dW/M1IAKydND/MsVwSQjPSYPjTy4UQ==}
     engines: {node: '>= 20.0.0'}
 
-  '@rivetkit/engine-envoy-protocol@2.3.7':
-    resolution: {integrity: sha512-lsJM3ERwozQCebaOMKJzqIQlcLbbN3LXurRB0+7LsM6FUUL2l6hMoq5I2De/G35DJ6OWDva9AmzfvzI+5f1GPg==}
+  '@rivetkit/engine-envoy-protocol@2.3.9':
+    resolution: {integrity: sha512-2IK41V9U8sgMnEYd/P6u/68nCufCU2dvxuHVV3uAV0uIVCdtRV8lkjuR2fSr05bwHmzSmewdqsbiNMiC/GWt8w==}
 
-  '@rivetkit/framework-base@2.3.7':
-    resolution: {integrity: sha512-zxmdAzFogA3PeT3ZgFIoYlEAJVi3iCwbPBXczZKf2x2QMCl2cTZ2jswFCAgHUUMQWj+AWiX65usxq73a9Ls/qQ==}
+  '@rivetkit/framework-base@2.3.9':
+    resolution: {integrity: sha512-ZSxrclYcpmdGsLMiVE2dfWNfUB6diSx+t8k4EQgL4cN02ThzJD3BM5mhU+zQVCCwfNw42eRZVIoxydYDLl/yHw==}
 
   '@rivetkit/on-change@6.0.1':
     resolution: {integrity: sha512-QBN/KRBXLJdCgN4gBTL3XAc/zKm58atSnieXWMOyFSPmo6F1/yIVV/LTRdvAktfCttrGx7W6c32i/lwqCHWnsQ==}
     engines: {node: '>=20'}
 
-  '@rivetkit/react@2.3.7':
-    resolution: {integrity: sha512-Y3UoUYhkLKDQrJdloCmYK+fhJMlPw5BPHbRb5VutFh5L8csIRZLoCoMitzV7mjNUxuDE1+k10iGuUHYPZUP4aA==}
+  '@rivetkit/react@2.3.9':
+    resolution: {integrity: sha512-j9t82h/yIqqSt17coQZeRu3F9Q5w2FgWPDUC9fCyQUJp9PTjO7ea494PR0lSWvuEiwMRqE5JpgbHdYUQ1woE9w==}
     peerDependencies:
       react: ^18 || ^19
       react-dom: ^18 || ^19
 
-  '@rivetkit/rivetkit-napi-darwin-arm64@2.3.7':
-    resolution: {integrity: sha512-gI1wMe6z85VDeR4K/wnzevVakXTg5UCfvjlDOp1+23nyU3NlInhN156dEWO8EsfRMrs+1bYoGdc4rcoN+4PUrw==}
+  '@rivetkit/rivetkit-napi-darwin-arm64@2.3.9':
+    resolution: {integrity: sha512-3Ls1gHUeYs1mByNDgt1H3s3b9gZaXyyFrrCagoK2HrBAr0celfMa2zh0fH1BrjZufyF5oC/Jvk3ALPCFCNf4EQ==}
     engines: {node: '>= 20.0.0'}
     cpu: [arm64]
     os: [darwin]
 
-  '@rivetkit/rivetkit-napi-darwin-x64@2.3.7':
-    resolution: {integrity: sha512-H5tUwvCbKwTIBiyQG01ikK5mdc9ISg+bv8gPUw41mYOKq8rb9nBLkcl2TKcreFHac8KaGxtnBZzYcjbUV3NcwQ==}
+  '@rivetkit/rivetkit-napi-darwin-x64@2.3.9':
+    resolution: {integrity: sha512-tsX60L7RXD9BnMU+0b8YnKfuAqYfH8sr6DnUAWk2z2Nnmc7E11RibVWSeny/+2LxD5Zib3f3G7Ea/Pt/NF+ypA==}
     engines: {node: '>= 20.0.0'}
     cpu: [x64]
     os: [darwin]
 
-  '@rivetkit/rivetkit-napi-linux-arm64-gnu@2.3.7':
-    resolution: {integrity: sha512-MpOeiO5M737e93hM/FjcH+zv8xBEX1tgBd/59K/Uw7qlRbWW7JGz8WGjavdxv211LRqxsn8EUlGRxcADDsXnBA==}
+  '@rivetkit/rivetkit-napi-linux-arm64-gnu@2.3.9':
+    resolution: {integrity: sha512-Ov1c40CgIXMiOOo8sLLDO4cCcUw3+H/8OMOYoa7a5a5snmbJlDLSi0YYACWGRcBJvCGrjeDtQGIN3JISTL8Q9Q==}
     engines: {node: '>= 20.0.0'}
     cpu: [arm64]
     os: [linux]
 
-  '@rivetkit/rivetkit-napi-linux-arm64-musl@2.3.7':
-    resolution: {integrity: sha512-0GsUgd/HHvIq6v92kp0H175mGm2Exvs4krBLih0MIpVAkqJk8EIcKI6wJhCwY04Fr0MS8sHkUhjuHXa7QcmlYA==}
+  '@rivetkit/rivetkit-napi-linux-arm64-musl@2.3.9':
+    resolution: {integrity: sha512-HgK83QYfT45HI+Ly+gWuoxWDSFzTgYJm0rFlmuOz8zweTirZ4ixHEE/lIQVU16lkHl4cO7PcRbQ1vUeQJMmVtA==}
     engines: {node: '>= 20.0.0'}
     cpu: [arm64]
     os: [linux]
 
-  '@rivetkit/rivetkit-napi-linux-x64-gnu@2.3.7':
-    resolution: {integrity: sha512-8wCD1FuDpM+yiKRG8ro1K8ILVpJXzCNKViJ1axq1b4Nyqgod/nyEvvKDaT4qhA5+Om+W5i6YRO1uddjC6QjJSQ==}
+  '@rivetkit/rivetkit-napi-linux-x64-gnu@2.3.9':
+    resolution: {integrity: sha512-GvGfGUpCpFGWzQdA5Yey5Y5ih+J6Ay/chEwa10UlzF4MC4bX0GM//0m2FXLFUXtBjNRNdhKvAAaXWdWBuZQsSw==}
     engines: {node: '>= 20.0.0'}
     cpu: [x64]
     os: [linux]
 
-  '@rivetkit/rivetkit-napi-linux-x64-musl@2.3.7':
-    resolution: {integrity: sha512-8RGzXD33GH1/DWufFzCZRI+npF5IL/9z7Ja3pthsuYgrL+axGG0iqfAjbwj5HHnB/ceUGQVT+uCKzoLnG+odtw==}
+  '@rivetkit/rivetkit-napi-linux-x64-musl@2.3.9':
+    resolution: {integrity: sha512-J48W7iLoqE8i1n1TvhxkxFrwJTxOsdXrVf7HyXUsEyLrb+kal/aS+/ta+Bfq/veJ7wZyDw7YkOIdn0BgPinIuQ==}
     engines: {node: '>= 20.0.0'}
     cpu: [x64]
     os: [linux]
 
-  '@rivetkit/rivetkit-napi-win32-x64-msvc@2.3.7':
-    resolution: {integrity: sha512-n1by/coKxWOb2FZDGLM2qmULxcLSqx8hxJuk7Hsb1gl4uNHGviUzYr+r7WAiOzonK/Dgy477u3OKf5yBie743A==}
+  '@rivetkit/rivetkit-napi-win32-x64-msvc@2.3.9':
+    resolution: {integrity: sha512-3oZYh56m3wTVAbipHI5Rnqw1vSTI1fzoksdm1x4a45TgKi1ULxPyl2fT2E9A/Jyn1LzfTfztazN6mX0//kxmxg==}
     engines: {node: '>= 20.0.0'}
     cpu: [x64]
     os: [win32]
 
-  '@rivetkit/rivetkit-napi@2.3.7':
-    resolution: {integrity: sha512-1d3HtNKzJwdkznWDWSpCwg1rBn+nVwUfcKrApINTfiEhfDyVeznwbVFkfHWqOBHsjU17vvWFfjjTtf8QsjLwUQ==}
+  '@rivetkit/rivetkit-napi@2.3.9':
+    resolution: {integrity: sha512-lUuOK1ja6ZMwnNRsdtqJeXChbBEqyvHuI/1h5XQWHfBUu7DgX5zuyA/FJ+BY6YFWtwnkHnOVCBJeNx/3gj8Xhg==}
     engines: {node: '>= 20.0.0'}
 
-  '@rivetkit/rivetkit-wasm@2.3.7':
-    resolution: {integrity: sha512-o7QBtFOJrajyPVBIDQ32k8sDNFsUc8v2ETfNpr+Ch374ydmZMzCv3XKJU9vubc9bZa7WpCHSzf5ztc8b8i/Xpg==}
+  '@rivetkit/rivetkit-wasm@2.3.9':
+    resolution: {integrity: sha512-KRCKnk0h3dvzuLHHDTKdguSCaZdDpeza4XucYi2+XZaZUJUP1zNxCHfKvQRZ1FaGhPx9rhZJTGV19+lLOWKSwA==}
 
-  '@rivetkit/traces@2.3.7':
-    resolution: {integrity: sha512-B7QYjFP2HPxyfPsVjfcNIV7FPLWgGWGypmlT/dZM1i1Cf1WRdeuBumPLffgs3YceiY7Pm4D/gZZVt5p0m4Cx+A==}
+  '@rivetkit/traces@2.3.9':
+    resolution: {integrity: sha512-T0og48gPh6RjIdwEuG7mEKOuxVA3R/Zcptf67z8dHVF78yuzHooeW0W0rvH6wlu4XGINWvYhGHMGY0uh4uyPEw==}
     engines: {node: '>=18.0.0'}
 
-  '@rivetkit/virtual-websocket@2.3.7':
-    resolution: {integrity: sha512-jwxDvYbr3YB6vFuxwRdB/AqUUMwdtC1rIAc4tNN6VQR3weHbE+PrDoHKbe85zrtlBtcnG89/p8tlovrj8qyQWA==}
+  '@rivetkit/virtual-websocket@2.3.9':
+    resolution: {integrity: sha512-exWO75dBB81w3ipXRg7twXY0SYQyDsB9ELJVhi1LtmWnmCn4FnHlzfinZKZlFAf5C9L0m9XAbJGS3WfRGRGlUg==}
 
-  '@rivetkit/workflow-engine@2.3.7':
-    resolution: {integrity: sha512-+C4kGuSNysrw2zs/LQoYxouOxufKHHMxiIXKF8Ab9GU2BCJ32RUST9dYU/gaQE/w9uM+hqAHUz0DTlOBYU6p6g==}
+  '@rivetkit/workflow-engine@2.3.9':
+    resolution: {integrity: sha512-RqbXdQYc2z/PCLwOyi14iimE/+m0v7Oq7DKuzdAxs4Y1jqslUZurkn3B40pjhaNN2Kz212BJXnbmaK4YHE/q8g==}
     engines: {node: '>=18.0.0'}
 
   '@rolldown/binding-android-arm64@1.1.5':
@@ -13107,8 +13095,8 @@ packages:
     resolution: {integrity: sha512-5Di9UC0+8h1L6ZD2d7awM7E/T4uA1fJRlx6zk/NvdCCVEoAnFqvHmCuNeIKoCeIixBX/q8uM+6ycDvF8woqosA==}
     engines: {node: '>= 0.8'}
 
-  rivetkit@2.3.7:
-    resolution: {integrity: sha512-V2IWlXq9SRLJWrcYVa8WUftELCpbdsBVWZIqz2WQjhhzRK9Aan65RfMoZVx62A9k8HuIO6MH1nAPLhOuk1xePQ==}
+  rivetkit@2.3.9:
+    resolution: {integrity: sha512-m8pd3+nfI81T8uxKPflOKXTvvRf6X/u5zW0vRqq6v+d/Dwh964jKAHp0pVo5R6D9PotNZQIroqy57AZvX7nc4g==}
     engines: {node: '>=22.0.0'}
     peerDependencies:
       drizzle-kit: ^0.31.2
@@ -16758,10 +16746,6 @@ snapshots:
 
   '@floating-ui/utils@0.2.12': {}
 
-  '@flue/sdk@1.0.0-beta.9':
-    dependencies:
-      '@durable-streams/client': 0.2.6
-
   '@fortawesome/fontawesome-common-types@6.7.2': {}
 
   '@fortawesome/fontawesome-common-types@7.3.1': {}
@@ -19007,11 +18991,11 @@ snapshots:
     optionalDependencies:
       pyodide: 0.28.3(bufferutil@4.1.0)
 
-  '@rivet-dev/flue@2.3.7(@opentelemetry/api@1.9.0)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@types/node@24.13.2)(better-sqlite3@12.8.0)(bufferutil@4.1.0)(esbuild@0.28.1)(hono@4.12.9)(jiti@2.7.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(tsx@4.21.0)(typebox@1.3.6)(typescript@5.9.3)(wrangler@4.113.0(bufferutil@4.1.0))(ws@8.21.0(bufferutil@4.1.0))(yaml@2.9.0)(zod-to-json-schema@3.25.2(zod@4.3.6))(zod@4.3.6)':
+  '@rivet-dev/flue@2.3.9(@opentelemetry/api@1.9.0)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@types/node@24.13.2)(better-sqlite3@12.8.0)(bufferutil@4.1.0)(esbuild@0.28.1)(hono@4.12.9)(jiti@2.7.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(tsx@4.21.0)(typebox@1.3.6)(typescript@5.9.3)(wrangler@4.113.0(bufferutil@4.1.0))(ws@8.21.0(bufferutil@4.1.0))(yaml@2.9.0)(zod-to-json-schema@3.25.2(zod@3.25.76))(zod@3.25.76)':
     dependencies:
-      '@flue/cli': '@rivet-dev/labs-flue-cli@1.0.0-beta.9-rivet.1(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@types/node@24.13.2)(bufferutil@4.1.0)(esbuild@0.28.1)(hono@4.12.9)(jiti@2.7.0)(tsx@4.21.0)(typebox@1.3.6)(typescript@5.9.3)(wrangler@4.113.0(bufferutil@4.1.0))(ws@8.21.0(bufferutil@4.1.0))(yaml@2.9.0)(zod-to-json-schema@3.25.2(zod@4.3.6))(zod@4.3.6)'
-      '@flue/runtime': '@rivet-dev/labs-flue-runtime@1.0.0-beta.9-rivet.1(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(bufferutil@4.1.0)(typebox@1.3.6)(typescript@5.9.3)(ws@8.21.0(bufferutil@4.1.0))(zod-to-json-schema@3.25.2(zod@4.3.6))(zod@4.3.6)'
-      rivetkit: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+      '@flue/cli': '@rivet-dev/labs-flue-cli@1.0.0-beta.9-rivet.2(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@types/node@24.13.2)(bufferutil@4.1.0)(esbuild@0.28.1)(hono@4.12.9)(jiti@2.7.0)(tsx@4.21.0)(typebox@1.3.6)(typescript@5.9.3)(wrangler@4.113.0(bufferutil@4.1.0))(ws@8.21.0(bufferutil@4.1.0))(yaml@2.9.0)(zod-to-json-schema@3.25.2(zod@3.25.76))(zod@3.25.76)'
+      '@flue/runtime': '@rivet-dev/labs-flue-runtime@1.0.0-beta.9-rivet.2(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(bufferutil@4.1.0)(typebox@1.3.6)(typescript@5.9.3)(ws@8.21.0(bufferutil@4.1.0))(zod-to-json-schema@3.25.2(zod@3.25.76))(zod@3.25.76)'
+      rivetkit: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
     transitivePeerDependencies:
       - '@aws-sdk/client-rds-data'
       - '@cloudflare/workers-types'
@@ -19074,54 +19058,10 @@ snapshots:
       - zod-openapi
       - zod-to-json-schema
 
-  '@rivet-dev/labs-flue-cli@1.0.0-beta.9-rivet.1(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@types/node@24.13.2)(bufferutil@4.1.0)(esbuild@0.28.1)(hono@4.12.9)(jiti@2.7.0)(tsx@4.21.0)(typebox@1.3.6)(typescript@5.9.3)(wrangler@4.113.0(bufferutil@4.1.0))(ws@8.21.0(bufferutil@4.1.0))(yaml@2.9.0)(zod-to-json-schema@3.25.2(zod@4.3.6))(zod@4.3.6)':
+  '@rivet-dev/labs-flue-cli@1.0.0-beta.9-rivet.2(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@types/node@24.13.2)(bufferutil@4.1.0)(esbuild@0.28.1)(hono@4.12.9)(jiti@2.7.0)(tsx@4.21.0)(typebox@1.3.6)(typescript@5.9.3)(wrangler@4.113.0(bufferutil@4.1.0))(ws@8.21.0(bufferutil@4.1.0))(yaml@2.9.0)(zod-to-json-schema@3.25.2(zod@3.25.76))(zod@3.25.76)':
     dependencies:
       '@cloudflare/vite-plugin': 1.46.0(bufferutil@4.1.0)(vite@8.1.5(@types/node@24.13.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.0))(wrangler@4.113.0(bufferutil@4.1.0))
-      '@flue/runtime': '@rivet-dev/labs-flue-runtime@1.0.0-beta.9-rivet.1(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(bufferutil@4.1.0)(typebox@1.3.6)(typescript@5.9.3)(ws@8.21.0(bufferutil@4.1.0))(zod-to-json-schema@3.25.2(zod@4.3.6))(zod@4.3.6)'
-      '@flue/sdk': 1.0.0-beta.9
-      '@hono/node-server': 2.0.11(hono@4.12.9)
-      '@vercel/detect-agent': 1.2.3
-      debug: 4.4.3(supports-color@8.1.1)
-      minisearch: 7.2.0
-      package-up: 5.0.0
-      picocolors: 1.1.1
-      ulidx: 2.4.1
-      valibot: 1.4.2(typescript@5.9.3)
-      vite: 8.1.5(@types/node@24.13.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.0)
-    transitivePeerDependencies:
-      - '@standard-schema/spec'
-      - '@types/json-schema'
-      - '@types/node'
-      - '@vitejs/devtools'
-      - arktype
-      - bufferutil
-      - effect
-      - esbuild
-      - hono
-      - jiti
-      - less
-      - sass
-      - sass-embedded
-      - stylus
-      - sugarss
-      - supports-color
-      - sury
-      - terser
-      - tsx
-      - typebox
-      - typescript
-      - utf-8-validate
-      - wrangler
-      - ws
-      - yaml
-      - zod
-      - zod-openapi
-      - zod-to-json-schema
-
-  '@rivet-dev/labs-flue-cli@1.0.0-beta.9-rivet.2(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@types/node@24.13.2)(bufferutil@4.1.0)(esbuild@0.28.1)(hono@4.12.9)(jiti@2.7.0)(tsx@4.21.0)(typebox@1.3.6)(typescript@5.9.3)(wrangler@4.113.0(bufferutil@4.1.0))(ws@8.21.0(bufferutil@4.1.0))(yaml@2.9.0)(zod-to-json-schema@3.25.2(zod@4.3.6))(zod@4.3.6)':
-    dependencies:
-      '@cloudflare/vite-plugin': 1.46.0(bufferutil@4.1.0)(vite@8.1.5(@types/node@24.13.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.0))(wrangler@4.113.0(bufferutil@4.1.0))
-      '@flue/runtime': '@rivet-dev/labs-flue-runtime@1.0.0-beta.9-rivet.2(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(bufferutil@4.1.0)(typebox@1.3.6)(typescript@5.9.3)(ws@8.21.0(bufferutil@4.1.0))(zod-to-json-schema@3.25.2(zod@4.3.6))(zod@4.3.6)'
+      '@flue/runtime': '@rivet-dev/labs-flue-runtime@1.0.0-beta.9-rivet.2(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(bufferutil@4.1.0)(typebox@1.3.6)(typescript@5.9.3)(ws@8.21.0(bufferutil@4.1.0))(zod-to-json-schema@3.25.2(zod@3.25.76))(zod@3.25.76)'
       '@flue/sdk': '@rivet-dev/labs-flue-sdk@1.0.0-beta.9-rivet.2'
       '@hono/node-server': 2.0.11(hono@4.12.9)
       '@vercel/detect-agent': 1.2.3
@@ -19158,41 +19098,6 @@ snapshots:
       - wrangler
       - ws
       - yaml
-      - zod
-      - zod-openapi
-      - zod-to-json-schema
-
-  '@rivet-dev/labs-flue-runtime@1.0.0-beta.9-rivet.1(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(bufferutil@4.1.0)(typebox@1.3.6)(typescript@5.9.3)(ws@8.21.0(bufferutil@4.1.0))(zod-to-json-schema@3.25.2(zod@4.3.6))(zod@4.3.6)':
-    dependencies:
-      '@cfworker/json-schema': 4.1.1
-      '@earendil-works/pi-agent-core': 0.80.10(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(bufferutil@4.1.0)(ws@8.21.0(bufferutil@4.1.0))(zod@4.3.6)
-      '@earendil-works/pi-ai': 0.80.10(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(bufferutil@4.1.0)(ws@8.21.0(bufferutil@4.1.0))(zod@4.3.6)
-      '@hono/node-server': 2.0.11(hono@4.12.9)
-      '@hono/standard-validator': 0.2.3(@standard-schema/spec@1.1.0)(hono@4.12.9)
-      '@modelcontextprotocol/sdk': 1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6)
-      '@standard-community/standard-json': 0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.7.1(valibot@1.4.2(typescript@5.9.3)))(quansync@0.2.11)(typebox@1.3.6)(valibot@1.4.2(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.3.6))(zod@4.3.6)
-      '@standard-community/standard-openapi': 0.2.9(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.7.1(valibot@1.4.2(typescript@5.9.3)))(quansync@0.2.11)(typebox@1.3.6)(valibot@1.4.2(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.3.6))(zod@4.3.6))(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(typebox@1.3.6)(valibot@1.4.2(typescript@5.9.3))(zod@4.3.6)
-      '@valibot/to-json-schema': 1.7.1(valibot@1.4.2(typescript@5.9.3))
-      hono: 4.12.9
-      hono-openapi: 1.3.1(@hono/standard-validator@0.2.3(@standard-schema/spec@1.1.0)(hono@4.12.9))(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.7.1(valibot@1.4.2(typescript@5.9.3)))(quansync@0.2.11)(typebox@1.3.6)(valibot@1.4.2(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.3.6))(zod@4.3.6))(@standard-community/standard-openapi@0.2.9(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.7.1(valibot@1.4.2(typescript@5.9.3)))(quansync@0.2.11)(typebox@1.3.6)(valibot@1.4.2(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.3.6))(zod@4.3.6))(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(typebox@1.3.6)(valibot@1.4.2(typescript@5.9.3))(zod@4.3.6))(@types/json-schema@7.0.15)(hono@4.12.9)(openapi-types@12.1.3)
-      js-yaml: 4.3.0
-      just-bash: 3.1.0
-      openapi-types: 12.1.3
-      quansync: 0.2.11
-      ulidx: 2.4.1
-      valibot: 1.4.2(typescript@5.9.3)
-    transitivePeerDependencies:
-      - '@standard-schema/spec'
-      - '@types/json-schema'
-      - arktype
-      - bufferutil
-      - effect
-      - supports-color
-      - sury
-      - typebox
-      - typescript
-      - utf-8-validate
-      - ws
       - zod
       - zod-openapi
       - zod-to-json-schema
@@ -19271,12 +19176,12 @@ snapshots:
     dependencies:
       '@durable-streams/client': 0.2.6
 
-  '@rivet-dev/vercel-world@2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))':
+  '@rivet-dev/vercel-world@2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))':
     dependencies:
       '@workflow/errors': 5.0.0-beta.11
       '@workflow/world': 5.0.0-beta.21
       cbor-x: 1.6.4
-      rivetkit: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+      rivetkit: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       ulid: 3.0.2
     transitivePeerDependencies:
       - '@aws-sdk/client-rds-data'
@@ -19417,38 +19322,38 @@ snapshots:
 
   '@rivetkit/bare-ts@0.6.2': {}
 
-  '@rivetkit/engine-cli-darwin-arm64@2.3.7':
+  '@rivetkit/engine-cli-darwin-arm64@2.3.9':
     optional: true
 
-  '@rivetkit/engine-cli-darwin-x64@2.3.7':
+  '@rivetkit/engine-cli-darwin-x64@2.3.9':
     optional: true
 
-  '@rivetkit/engine-cli-linux-arm64-musl@2.3.7':
+  '@rivetkit/engine-cli-linux-arm64-musl@2.3.9':
     optional: true
 
-  '@rivetkit/engine-cli-linux-x64-musl@2.3.7':
+  '@rivetkit/engine-cli-linux-x64-musl@2.3.9':
     optional: true
 
-  '@rivetkit/engine-cli-win32-x64@2.3.7':
+  '@rivetkit/engine-cli-win32-x64@2.3.9':
     optional: true
 
-  '@rivetkit/engine-cli@2.3.7':
+  '@rivetkit/engine-cli@2.3.9':
     optionalDependencies:
-      '@rivetkit/engine-cli-darwin-arm64': 2.3.7
-      '@rivetkit/engine-cli-darwin-x64': 2.3.7
-      '@rivetkit/engine-cli-linux-arm64-musl': 2.3.7
-      '@rivetkit/engine-cli-linux-x64-musl': 2.3.7
-      '@rivetkit/engine-cli-win32-x64': 2.3.7
+      '@rivetkit/engine-cli-darwin-arm64': 2.3.9
+      '@rivetkit/engine-cli-darwin-x64': 2.3.9
+      '@rivetkit/engine-cli-linux-arm64-musl': 2.3.9
+      '@rivetkit/engine-cli-linux-x64-musl': 2.3.9
+      '@rivetkit/engine-cli-win32-x64': 2.3.9
 
-  '@rivetkit/engine-envoy-protocol@2.3.7':
+  '@rivetkit/engine-envoy-protocol@2.3.9':
     dependencies:
       '@rivetkit/bare-ts': 0.6.2
 
-  '@rivetkit/framework-base@2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))':
+  '@rivetkit/framework-base@2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))':
     dependencies:
       '@tanstack/store': 0.7.7
       fast-deep-equal: 3.1.3
-      rivetkit: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+      rivetkit: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
     transitivePeerDependencies:
       - '@aws-sdk/client-rds-data'
       - '@cloudflare/workers-types'
@@ -19486,13 +19391,13 @@ snapshots:
 
   '@rivetkit/on-change@6.0.1': {}
 
-  '@rivetkit/react@2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))':
+  '@rivetkit/react@2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))':
     dependencies:
-      '@rivetkit/framework-base': 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+      '@rivetkit/framework-base': 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
       '@tanstack/react-store': 0.7.7(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       react: 19.2.7
       react-dom: 19.2.7(react@19.2.7)
-      rivetkit: 2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
+      rivetkit: 2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0))
     transitivePeerDependencies:
       - '@aws-sdk/client-rds-data'
       - '@cloudflare/workers-types'
@@ -19528,52 +19433,52 @@ snapshots:
       - sqlite3
       - ws
 
-  '@rivetkit/rivetkit-napi-darwin-arm64@2.3.7':
+  '@rivetkit/rivetkit-napi-darwin-arm64@2.3.9':
     optional: true
 
-  '@rivetkit/rivetkit-napi-darwin-x64@2.3.7':
+  '@rivetkit/rivetkit-napi-darwin-x64@2.3.9':
     optional: true
 
-  '@rivetkit/rivetkit-napi-linux-arm64-gnu@2.3.7':
+  '@rivetkit/rivetkit-napi-linux-arm64-gnu@2.3.9':
     optional: true
 
-  '@rivetkit/rivetkit-napi-linux-arm64-musl@2.3.7':
+  '@rivetkit/rivetkit-napi-linux-arm64-musl@2.3.9':
     optional: true
 
-  '@rivetkit/rivetkit-napi-linux-x64-gnu@2.3.7':
+  '@rivetkit/rivetkit-napi-linux-x64-gnu@2.3.9':
     optional: true
 
-  '@rivetkit/rivetkit-napi-linux-x64-musl@2.3.7':
+  '@rivetkit/rivetkit-napi-linux-x64-musl@2.3.9':
     optional: true
 
-  '@rivetkit/rivetkit-napi-win32-x64-msvc@2.3.7':
+  '@rivetkit/rivetkit-napi-win32-x64-msvc@2.3.9':
     optional: true
 
-  '@rivetkit/rivetkit-napi@2.3.7':
+  '@rivetkit/rivetkit-napi@2.3.9':
     dependencies:
       '@napi-rs/cli': 2.18.4
-      '@rivetkit/engine-envoy-protocol': 2.3.7
+      '@rivetkit/engine-envoy-protocol': 2.3.9
     optionalDependencies:
-      '@rivetkit/rivetkit-napi-darwin-arm64': 2.3.7
-      '@rivetkit/rivetkit-napi-darwin-x64': 2.3.7
-      '@rivetkit/rivetkit-napi-linux-arm64-gnu': 2.3.7
-      '@rivetkit/rivetkit-napi-linux-arm64-musl': 2.3.7
-      '@rivetkit/rivetkit-napi-linux-x64-gnu': 2.3.7
-      '@rivetkit/rivetkit-napi-linux-x64-musl': 2.3.7
-      '@rivetkit/rivetkit-napi-win32-x64-msvc': 2.3.7
+      '@rivetkit/rivetkit-napi-darwin-arm64': 2.3.9
+      '@rivetkit/rivetkit-napi-darwin-x64': 2.3.9
+      '@rivetkit/rivetkit-napi-linux-arm64-gnu': 2.3.9
+      '@rivetkit/rivetkit-napi-linux-arm64-musl': 2.3.9
+      '@rivetkit/rivetkit-napi-linux-x64-gnu': 2.3.9
+      '@rivetkit/rivetkit-napi-linux-x64-musl': 2.3.9
+      '@rivetkit/rivetkit-napi-win32-x64-msvc': 2.3.9
 
-  '@rivetkit/rivetkit-wasm@2.3.7': {}
+  '@rivetkit/rivetkit-wasm@2.3.9': {}
 
-  '@rivetkit/traces@2.3.7':
+  '@rivetkit/traces@2.3.9':
     dependencies:
       '@rivetkit/bare-ts': 0.6.2
       cbor-x: 1.6.4
       fdb-tuple: 1.0.0
       vbare: 0.0.4
 
-  '@rivetkit/virtual-websocket@2.3.7': {}
+  '@rivetkit/virtual-websocket@2.3.9': {}
 
-  '@rivetkit/workflow-engine@2.3.7':
+  '@rivetkit/workflow-engine@2.3.9':
     dependencies:
       '@rivetkit/bare-ts': 0.6.2
       cbor-x: 1.6.4
@@ -25833,19 +25738,19 @@ snapshots:
       hash-base: 3.1.2
       inherits: 2.0.4
 
-  rivetkit@2.3.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0)):
+  rivetkit@2.3.9(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(pyodide@0.28.3(bufferutil@4.1.0))(sql.js@1.14.1)(ws@8.21.0(bufferutil@4.1.0)):
     dependencies:
       '@hono/zod-openapi': 1.4.0(hono@4.12.9)(zod@4.3.6)
       '@rivet-dev/agent-os-core': 0.1.1(pyodide@0.28.3(bufferutil@4.1.0))
       '@rivetkit/bare-ts': 0.6.2
-      '@rivetkit/engine-cli': 2.3.7
-      '@rivetkit/engine-envoy-protocol': 2.3.7
+      '@rivetkit/engine-cli': 2.3.9
+      '@rivetkit/engine-envoy-protocol': 2.3.9
       '@rivetkit/on-change': 6.0.1
-      '@rivetkit/rivetkit-napi': 2.3.7
-      '@rivetkit/rivetkit-wasm': 2.3.7
-      '@rivetkit/traces': 2.3.7
-      '@rivetkit/virtual-websocket': 2.3.7
-      '@rivetkit/workflow-engine': 2.3.7
+      '@rivetkit/rivetkit-napi': 2.3.9
+      '@rivetkit/rivetkit-wasm': 2.3.9
+      '@rivetkit/traces': 2.3.9
+      '@rivetkit/virtual-websocket': 2.3.9
+      '@rivetkit/workflow-engine': 2.3.9
       cbor-x: 1.6.4
       drizzle-orm: 0.44.7(@opentelemetry/api@1.9.0)(better-sqlite3@12.8.0)(sql.js@1.14.1)
       hono: 4.12.9
